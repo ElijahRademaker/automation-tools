@@ -7,4 +7,4 @@
 3. Edit the bookmark and paste **this entire line** into the URL field:
 
 ```text
-javascript:(function(){var s=document.createElement('script');s.src='https://raw.githubusercontent.com/ElijahRademaker/automation-tools/refs/heads/main/cuimport.js?'+Date.now();document.body.appendChild(s);})();
+javascript:(async function(){  const r = await fetch(    'https://raw.githubusercontent.com/ElijahRademaker/automation-tools/refs/heads/main/cuimport.js?%27+Date.now()  );  eval(await r.text());})();
