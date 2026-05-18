@@ -175,19 +175,26 @@
     const data = await res.json();
 
     const rows = [["node_type", "pole_tag", "latitude", "longitude", "scid"]];
-    let scid = 1;
+const totalPoles = data.features.length;
+const scidWidth = String(totalPoles).length;
 
-    data.features.forEach(f => {
-const ceTag = f.attributes.CE_TAG ? f.attributes.CE_TAG : "Unknown";
+let scid = 1;
 
-rows.push([
-  "pole",
-  `${f.attributes.OWNER}::${ceTag}::True`,
-  f.geometry.y,
-  f.geometry.x,
-  scid++
-]);
-    });
+data.features.forEach(f => {
+  const ceTag = f.attributes.CE_TAG || "UNKNOWN";
+
+  const paddedScid = String(scid).padStart(scidWidth, "0");
+
+  rows.push([
+    "pole",
+    `${f.attributes.OWNER}::${ceTag}::True`,
+    f.geometry.y,
+    f.geometry.x,
+    paddedScid
+  ]);
+
+  scid++;
+});
 
     const csv = rows.map(r => r.join(",")).join("\n");
 
