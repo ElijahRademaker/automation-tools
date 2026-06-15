@@ -256,7 +256,12 @@ if (!MAP_BBOX || !MAP_TOKEN) {
 
     poles.clear(); graph.clear(); conductorFeatures=[];
 
-    const poleUrl=`https://gis.consumersenergy.com/.../${POLE_LAYER}/query?...&geometry=${geom}&token=${MAP_TOKEN}`;
+    const poleUrl =
+  `https://gis.consumersenergy.com/mapping/rest/services/Electric/Electric_PUB/MapServer/${POLE_LAYER}/query` +
+  `?where=1=1&outFields=*&returnGeometry=true&geometryType=esriGeometryPolygon` +
+  `&geometry=${geom}&spatialRel=esriSpatialRelIntersects&inSR=102100&outSR=102100` +
+  `&f=json&token=${MAP_TOKEN}`;
+
     const poleJson=await (await fetch(poleUrl)).json();
 
     poleJson.features.forEach(f=>{
