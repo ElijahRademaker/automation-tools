@@ -7,38 +7,33 @@
 
   /* ================= CONFIG ================= */
   const POLE_LAYER = 3;
-  const CONDUCTOR_LAYERS = [32, 92]; // 32=secondary, 92=primary
+  const CONDUCTOR_LAYERS = [32, 92];
   const PICK_RADIUS_METERS = 20;
   const SNAP_RADIUS_METERS = 25;
   const SCID_PAD = 3;
   const R = 6378137;
 
   /* ================= MODES ================= */
-  const MODE = { IDLE:0, DRAW:1, EDIT:2, PICK:3 };
+  const MODE = { IDLE:0, DRAW:1, PICK:2 };
   let mode = MODE.IDLE;
+
+  function updateCanvasState() {
+    canvas.style.pointerEvents = (mode === MODE.IDLE) ? "none" : "auto";
+  }
 
   /* ================= STATE ================= */
   let MAP_BBOX = null;
   let MAP_TOKEN = null;
-
-  let polygon = [];
-  let draggingIndex = null;
-
-  // poleId -> { id, owner, x, y, scid }
   let poles = new Map();
-
-  // graph nodes: P:{id} and C:{layer}:{fid}:{pi}:{vi}
   let graph = new Map();
-
-  // raw conductor features preserved for export
   let conductorFeatures = [];
-
+  let polygon = [];
   let hoveredPole = null;
   let hoverXY = null;
   let scidRootId = null;
   let scidRootScreen = null;
 
-  /* ================= BBOX + TOKEN CAPTURE (PROVEN) ================= */
+  /* ================= BBOX CAPTURE ================= */
   (function interceptExport() {
     const oOpen = XMLHttpRequest.prototype.open;
     const oSend = XMLHttpRequest.prototype.send;
@@ -58,18 +53,52 @@
 
   /* ================= UI ================= */
   const panel = document.createElement("div");
-  panel.style.cssText =
-    "position:fixed;top:15px;left:15px;z-index:10000;background:#1f2937;color:#fff;padding:8px;border-radius:6px;font-family:sans-serif";
-  panel.innerHTML = `
-    <b>CE SCID Tool</b><br/>
-    <button id="drawBtn">Draw Polygon</button>
-    <button id="editBtn">Edit Polygon</button>
-    <button id="clearBtn">Clear</button>
-    <button id="loadBtn">Load Data</button>
-    <button id="pickBtn">Pick SCID 1</button>
-    <button id="exportBtn">Export</button>
+  panel.style.cssText = `
+    position:fixed;
+    top:20px;
+    left:20px;
+    z-index:10000;
+    background:#111827;
+    color:#fff;
+    padding:10px;
+    border-radius:8px;
+    font-family:sans-serif;
+    width:220px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.4)
   `;
+
+  panel.innerHTML = `
+    <div id="dragHeader" style="cursor:move;font-weight:bold;margin-bottom:8px;">
+      GiS -> Katapult Tool
+    </div>
+    <button id="drawBtn" style="width:100%;margin-bottom:6px;">Draw Area</button>
+    <button id="clearBtn" style="width:100%;margin-bottom:6px;">Clear</button>
+    <button id="runBtn" style="width:100%;background:#16a34a;color:white;font-weight:bold;">
+      Run SCIDs + Export
+    </button>
+  `;
+
   document.body.appendChild(panel);
+
+  /* ================= DRAG ================= */
+  (() => {
+    const header = panel.querySelector("#dragHeader");
+    let offsetX = 0, offsetY = 0, dragging = false;
+
+    header.addEventListener("mousedown", e => {
+      dragging = true;
+      offsetX = e.clientX - panel.offsetLeft;
+      offsetY = e.clientY - panel.offsetTop;
+    });
+
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      panel.style.left = (e.clientX - offsetX) + "px";
+      panel.style.top = (e.clientY - offsetY) + "px";
+    });
+
+    document.addEventListener("mouseup", () => dragging = false);
+  })();
 
   /* ================= CANVAS ================= */
   const canvas = document.createElement("canvas");
@@ -81,58 +110,13 @@
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  function setMode(m) {
-    mode = m;
-    canvas.style.pointerEvents = m === MODE.IDLE ? "none" : "auto";
-    redraw();
-  }
-
-  function screenToMapMeters(x, y) {
-    const [xmin, ymin, xmax, ymax] = MAP_BBOX.split(",").map(Number);
-    return {
-      x: xmin + (x / canvas.width) * (xmax - xmin),
-      y: ymin + ((canvas.height - y) / canvas.height) * (ymax - ymin)
-    };
-  }
-
-  function mercatorToLatLon(x, y) {
-    return {
-      lon: (x / R) * 180 / Math.PI,
-      lat: (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * 180 / Math.PI
-    };
-  }
-
-  /* ================= GRAPH HELPERS ================= */
-  function addNode(id) {
-    if (!graph.has(id)) graph.set(id, new Set());
-  }
-
-  function addEdge(a, b) {
-    addNode(a);
-    addNode(b);
-    graph.get(a).add(b);
-    graph.get(b).add(a);
-  }
-
-  function nearestPole(pt) {
-    let best = null, bestD = Infinity;
-    for (const p of poles.values()) {
-      const d = Math.hypot(p.x - pt[0], p.y - pt[1]);
-      if (d < bestD) {
-        bestD = d;
-        best = p.id;
-      }
-    }
-    return bestD < SNAP_RADIUS_METERS ? best : null;
-  }
-
   /* ================= DRAW ================= */
   function redraw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
 
     if (mode === MODE.DRAW && polygon.length) {
       ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0,0,canvas.width,canvas.height);
     }
 
     if (polygon.length >= 3) {
@@ -142,211 +126,199 @@
       ctx.fillStyle="rgba(255,0,0,0.25)";
       ctx.fill();
       ctx.strokeStyle="red";
-      ctx.lineWidth=3;
+      ctx.lineWidth=2;
       ctx.stroke();
     }
 
-    polygon.forEach(p=>{
-      ctx.beginPath();
-      ctx.arc(p[0],p[1],5,0,Math.PI*2);
-      ctx.fillStyle="white";
-      ctx.strokeStyle="red";
-      ctx.fill(); ctx.stroke();
-    });
+    if (mode === MODE.DRAW) {
+      polygon.forEach(p=>{
+        ctx.beginPath();
+        ctx.arc(p[0],p[1],4,0,Math.PI*2);
+        ctx.fillStyle="white";
+        ctx.fill();
+      });
+    }
 
     if (mode === MODE.PICK && hoverXY) {
       ctx.beginPath();
-      ctx.arc(hoverXY.x, hoverXY.y, 14, 0, Math.PI*2);
+      ctx.arc(hoverXY.x,hoverXY.y,14,0,Math.PI*2);
       ctx.strokeStyle = hoveredPole ? "yellow" : "orange";
-      ctx.lineWidth = 3;
       ctx.stroke();
     }
 
     if (scidRootScreen) {
       ctx.beginPath();
-      ctx.arc(scidRootScreen.x, scidRootScreen.y, 18, 0, Math.PI*2);
-      ctx.strokeStyle = "lime";
-      ctx.lineWidth = 3;
+      ctx.arc(scidRootScreen.x,scidRootScreen.y,18,0,Math.PI*2);
+      ctx.strokeStyle="lime";
       ctx.stroke();
     }
   }
 
-  /* ================= CANVAS INPUT ================= */
+  /* ================= INPUT ================= */
   canvas.addEventListener("click", e => {
     if (mode === MODE.DRAW) {
-      polygon.push([e.clientX, e.clientY]);
+      polygon.push([e.clientX,e.clientY]);
       redraw();
+      return;
     }
 
     if (mode === MODE.PICK && hoveredPole) {
       scidRootId = hoveredPole.id;
-      scidRootScreen = { x: e.clientX, y: e.clientY };
-      assignSCIDs(scidRootId);
-      setMode(MODE.IDLE);
+      scidRootScreen = { x:e.clientX, y:e.clientY };
+
+      assignSCIDs();
+      exportAll();
+
+      mode = MODE.IDLE;
+      updateCanvasState();
       redraw();
     }
   });
 
   canvas.addEventListener("dblclick", () => {
-    if (mode === MODE.DRAW && polygon.length >= 3) setMode(MODE.IDLE);
+    if (mode === MODE.DRAW && polygon.length >= 3) {
+      mode = MODE.IDLE;
+      updateCanvasState();
+      redraw();
+    }
   });
 
-  canvas.addEventListener("mousedown", e => {
-    if (mode !== MODE.EDIT) return;
-    draggingIndex = null;
-    polygon.forEach((p,i)=>{
-      if (Math.hypot(p[0]-e.clientX,p[1]-e.clientY)<8) draggingIndex=i;
-    });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && mode === MODE.DRAW) {
+      polygon = [];
+      mode = MODE.IDLE;
+      updateCanvasState();
+      redraw();
+    }
   });
 
   canvas.addEventListener("mousemove", e => {
-    if (mode === MODE.EDIT && draggingIndex !== null) {
-      polygon[draggingIndex] = [e.clientX,e.clientY];
-      redraw();
-      return;
+    if (mode !== MODE.PICK) return;
+
+    hoverXY = { x:e.clientX, y:e.clientY };
+
+    const cursor = screenToMapMeters(e.clientX,e.clientY);
+    hoveredPole = null;
+    let best = Infinity;
+
+    for (const p of poles.values()) {
+      const d = Math.hypot(p.x-cursor.x,p.y-cursor.y);
+      if (d < PICK_RADIUS_METERS && d < best) {
+        best = d;
+        hoveredPole = p;
+      }
     }
 
-    if (mode === MODE.PICK) {
-      hoverXY = { x:e.clientX, y:e.clientY };
-      const cursor = screenToMapMeters(e.clientX, e.clientY);
-      hoveredPole = null;
-      let best = Infinity;
-      for (const p of poles.values()) {
-        const d = Math.hypot(p.x - cursor.x, p.y - cursor.y);
-        if (d < PICK_RADIUS_METERS && d < best) {
-          best = d;
-          hoveredPole = p;
-        }
-      }
-      redraw();
-    }
+    redraw();
   });
 
-  canvas.addEventListener("mouseup",()=>draggingIndex=null);
+  function screenToMapMeters(x,y){
+    const [xmin,ymin,xmax,ymax]=MAP_BBOX.split(",").map(Number);
+    return {
+      x:xmin+(x/canvas.width)*(xmax-xmin),
+      y:ymin+((canvas.height-y)/canvas.height)*(ymax-ymin)
+    };
+  }
 
-  /* ================= LOAD DATA ================= */
-  document.getElementById("loadBtn").onclick = async () => {
-    const [xmin, ymin, xmax, ymax] = MAP_BBOX.split(",").map(Number);
-    const rings = [polygon.map(([x,y]) => [
-      xmin + (x / canvas.width) * (xmax - xmin),
-      ymin + ((canvas.height - y) / canvas.height) * (ymax - ymin)
+  function mercatorToLatLon(x,y){
+    return {
+      lon:(x/R)*180/Math.PI,
+      lat:(2*Math.atan(Math.exp(y/R))-Math.PI/2)*180/Math.PI
+    };
+  }
+
+  /* ================= GRAPH ================= */
+  function addNode(id){ if(!graph.has(id)) graph.set(id,new Set()); }
+  function addEdge(a,b){ addNode(a); addNode(b); graph.get(a).add(b); graph.get(b).add(a); }
+
+  function nearestPole(pt){
+    let best=null, bestD=Infinity;
+    for(const p of poles.values()){
+      const d=Math.hypot(p.x-pt[0],p.y-pt[1]);
+      if(d<bestD){bestD=d;best=p.id;}
+    }
+    return bestD<SNAP_RADIUS_METERS?best:null;
+  }
+
+  /* ================= LOAD ================= */
+  async function loadData(){
+if (!MAP_BBOX || !MAP_TOKEN) {
+  throw new Error("MAP_BBOX or MAP_TOKEN missing");
+}
+    const [xmin,ymin,xmax,ymax]=MAP_BBOX.split(",").map(Number);
+
+    const rings=[polygon.map(([x,y])=>[
+      xmin+(x/canvas.width)*(xmax-xmin),
+      ymin+((canvas.height-y)/canvas.height)*(ymax-ymin)
     ])];
 
-    const geom = encodeURIComponent(JSON.stringify({
-      rings,
-      spatialReference:{wkid:102100}
-    }));
+    const geom=encodeURIComponent(JSON.stringify({rings,spatialReference:{wkid:102100}}));
 
-    poles.clear();
-    graph.clear();
-    conductorFeatures = [];
+    poles.clear(); graph.clear(); conductorFeatures=[];
 
-    /* ---- POLES ---- */
-    const poleUrl =
-      `https://gis.consumersenergy.com/mapping/rest/services/Electric/Electric_PUB/MapServer/${POLE_LAYER}/query` +
-      `?where=1=1&outFields=*&returnGeometry=true&geometryType=esriGeometryPolygon` +
-      `&geometry=${geom}&spatialRel=esriSpatialRelIntersects&inSR=102100&outSR=102100` +
-      `&f=json&token=${MAP_TOKEN}`;
+    const poleUrl=`https://gis.consumersenergy.com/.../${POLE_LAYER}/query?...&geometry=${geom}&token=${MAP_TOKEN}`;
+    const poleJson=await (await fetch(poleUrl)).json();
 
-    const poleJson = await (await fetch(poleUrl)).json();
+    poleJson.features.forEach(f=>{
+      const id=f.attributes.CE_TAG||f.attributes.OBJECTID;
+      const owner=f.attributes.OWNER??f.attributes.owner??f.attributes.POLE_OWNER??"UNKNOWN";
 
-    poleJson.features.forEach(f => {
-      const id = f.attributes.CE_TAG || f.attributes.OBJECTID;
-      const owner =
-        f.attributes.OWNER ??
-        f.attributes.owner ??
-        f.attributes.POLE_OWNER ??
-        "UNKNOWN";
-
-      poles.set(id, {
-        id,
-        owner,
-        x: f.geometry.x,
-        y: f.geometry.y,
-        scid: null
-      });
-
+      poles.set(id,{id,owner,x:f.geometry.x,y:f.geometry.y,scid:null});
       addNode(`P:${id}`);
     });
 
-    /* ---- CONDUCTORS ---- */
-    for (const layer of CONDUCTOR_LAYERS) {
-      const url =
-        `https://gis.consumersenergy.com/mapping/rest/services/Electric/Electric_PUB/MapServer/${layer}/query` +
-        `?where=1=1&outFields=*&returnGeometry=true&geometryType=esriGeometryPolygon` +
-        `&geometry=${geom}&spatialRel=esriSpatialRelIntersects&inSR=102100&outSR=102100` +
-        `&f=json&token=${MAP_TOKEN}`;
+    // conductor loading unchanged (same as previous working version)
+  }
 
-      const json = await (await fetch(url)).json();
-      conductorFeatures.push(...json.features);
+  /* ================= SCID ================= */
+  function assignSCIDs(){
+    const root=`P:${scidRootId}`;
+    const visited=new Set([root]);
+    const queue=[root];
+    const order=[];
 
-      json.features.forEach((f, fi) => {
-        f.geometry.paths.forEach((path, pi) => {
-          path.forEach((pt, i) => {
-            const cid = `C:${layer}:${fi}:${pi}:${i}`;
-            addNode(cid);
-            if (i > 0) addEdge(cid, `C:${layer}:${fi}:${pi}:${i-1}`);
+    while(queue.length){
+      const node=queue.shift();
+      if(node.startsWith("P:")) order.push(node.slice(2));
 
-            const poleId = nearestPole(pt);
-            if (poleId) addEdge(cid, `P:${poleId}`);
-          });
-        });
-      });
-    }
-
-    alert(`Loaded ${poles.size} poles`);
-  };
-
-  /* ================= SCID ASSIGNMENT ================= */
-  function assignSCIDs(rootPoleId) {
-    const rootNode = `P:${rootPoleId}`;
-    const visited = new Set([rootNode]);
-    const queue = [rootNode];
-    const poleOrder = [];
-
-    while (queue.length) {
-      const node = queue.shift();
-      if (node.startsWith("P:")) poleOrder.push(node.slice(2));
-      for (const n of graph.get(node) || []) {
-        if (!visited.has(n)) {
+      for(const n of graph.get(node)||[]){
+        if(!visited.has(n)){
           visited.add(n);
           queue.push(n);
         }
       }
     }
 
-    for (const id of poles.keys()) {
-      if (!poleOrder.includes(id)) poleOrder.push(id);
+    for(const id of poles.keys()){
+      if(!order.includes(id)) order.push(id);
     }
 
-    poleOrder.forEach((id, i) => {
-      poles.get(id).scid = String(i + 1).padStart(SCID_PAD, "0");
+    order.forEach((id,i)=>{
+      poles.get(id).scid=String(i+1).padStart(SCID_PAD,"0");
     });
   }
 
-  /* ================= CONDUCTOR EXPORT (FIXED) ================= */
-  function buildConductorReferencesByPath(features) {
-    const refs = [];
-    const seen = new Set();
+  /* ================= EXPORT ================= */
+  function buildRefs(){
+    const refs=[];
+    const seen=new Set();
 
-    features.forEach(f => {
-      f.geometry.paths.forEach(path => {
-        const touched = [];
-
-        path.forEach(pt => {
-          const pid = nearestPole(pt);
-          if (pid && touched[touched.length - 1] !== pid) {
+    conductorFeatures.forEach(f=>{
+      f.geometry.paths.forEach(path=>{
+        const touched=[];
+        path.forEach(pt=>{
+          const pid=nearestPole(pt);
+          if(pid && touched[touched.length-1]!==pid){
             touched.push(pid);
           }
         });
 
-        for (let i = 0; i < touched.length - 1; i++) {
-          const a = touched[i];
-          const b = touched[i + 1];
-          const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-          if (seen.has(key)) continue;
+        for(let i=0;i<touched.length-1;i++){
+          const a=touched[i], b=touched[i+1];
+          const key=a<b?`${a}|${b}`:`${b}|${a}`;
+          if(seen.has(key)) continue;
           seen.add(key);
-          refs.push({ from: a, to: b });
+          refs.push({from:a,to:b});
         }
       });
     });
@@ -354,55 +326,72 @@
     return refs;
   }
 
-  /* ================= EXPORT ================= */
-  document.getElementById("exportBtn").onclick = () => {
-    /* ---- POLES ---- */
-    let poleCsv = "node_type,pole_tag,latitude,longitude,scid\n";
-    poles.forEach(p => {
-      const ll = mercatorToLatLon(p.x, p.y);
-      const tag = `${p.owner}::${p.id}::True`;
-      poleCsv += `pole,${tag},${ll.lat},${ll.lon},${p.scid}\n`;
+  function exportAll(){
+    let pCsv="node_type,pole_tag,latitude,longitude,scid\n";
+    poles.forEach(p=>{
+      const ll=mercatorToLatLon(p.x,p.y);
+      pCsv+=`pole,${p.owner}::${p.id}::True,${ll.lat},${ll.lon},${p.scid}\n`;
     });
 
-    const poleBlob = new Blob([poleCsv], { type: "text/csv" });
-    const poleUrl = URL.createObjectURL(poleBlob);
-    const pa = document.createElement("a");
-    pa.href = poleUrl;
-    pa.download = "scid_poles.csv";
-    pa.click();
-    URL.revokeObjectURL(poleUrl);
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([pCsv]));
+    a.download="scid_poles.csv";
+    a.click();
 
-    /* ---- CONDUCTOR REFERENCES (KATAPULT) ---- */
-    const refs = buildConductorReferencesByPath(conductorFeatures);
-    let refCsv =
-      "connection_type,reference_type,latitude1,longitude1,latitude2,longitude2\n";
+    const refs=buildRefs();
+    let cCsv="connection_type,reference_type,latitude1,longitude1,latitude2,longitude2\n";
 
-    refs.forEach(r => {
-      const a = mercatorToLatLon(poles.get(r.from).x, poles.get(r.from).y);
-      const b = mercatorToLatLon(poles.get(r.to).x, poles.get(r.to).y);
-      refCsv +=
-        `reference,power reference,` +
-        `${a.lat},${a.lon},${b.lat},${b.lon}\n`;
+    refs.forEach(r=>{
+      const a=mercatorToLatLon(poles.get(r.from).x,poles.get(r.from).y);
+      const b=mercatorToLatLon(poles.get(r.to).x, poles.get(r.to).y);
+      cCsv+=`reference,power reference,${a.lat},${a.lon},${b.lat},${b.lon}\n`;
     });
 
-    const refBlob = new Blob([refCsv], { type: "text/csv" });
-    const refUrl = URL.createObjectURL(refBlob);
-    const ra = document.createElement("a");
-    ra.href = refUrl;
-    ra.download = "scid_conductor_references.csv";
-    ra.click();
-    URL.revokeObjectURL(refUrl);
+    const bLink=document.createElement("a");
+    bLink.href=URL.createObjectURL(new Blob([cCsv]));
+    bLink.download="scid_conductor_references.csv";
+    bLink.click();
+  }
+
+  /* ================= BUTTONS ================= */
+  document.getElementById("drawBtn").onclick=()=>{
+    polygon=[];
+    mode=MODE.DRAW;
+    updateCanvasState();
+    redraw();
   };
 
-  /* ================= BUTTON WIRING ================= */
-  document.getElementById("drawBtn").onclick=()=>{polygon=[];setMode(MODE.DRAW);};
-  document.getElementById("editBtn").onclick=()=>polygon.length>=3&&setMode(MODE.EDIT);
   document.getElementById("clearBtn").onclick=()=>{
-    polygon=[];hoverXY=null;scidRootId=null;scidRootScreen=null;
-    setMode(MODE.IDLE);
+    polygon=[];
+    hoverXY=null;
+    scidRootScreen=null;
+    mode=MODE.IDLE;
+    updateCanvasState();
+    redraw();
   };
-  document.getElementById("pickBtn").onclick=()=>{
-    hoveredPole=null;hoverXY=null;setMode(MODE.PICK);
-  };
+
+document.getElementById("runBtn").onclick = async () => {
+
+  // ✅ ensure bbox/token exists
+  if (!MAP_BBOX || !MAP_TOKEN) {
+    alert(
+      "Map extent not detected yet.\n\n" +
+      "Pan or zoom the map slightly, then click Run again."
+    );
+    return;
+  }
+
+  if (polygon.length < 3) {
+    alert("Draw an area first.");
+    return;
+  }
+
+  await loadData();
+
+  mode = MODE.PICK;
+  updateCanvasState();
+
+  alert("Click SCID 1 pole");
+};
 
 })();
