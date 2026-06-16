@@ -253,18 +253,33 @@ function assignSCIDs() {
   const visited = new Set();
   const order = [];
 
+  function branchLength(start, parent) {
+    const seen = new Set([parent]);
+    let stack = [start];
+    let count = 0;
+
+    while (stack.length) {
+      const node = stack.pop();
+      if (seen.has(node)) continue;
+      seen.add(node);
+      count++;
+
+      const nexts = (adjacency.get(node) || []);
+      for (const n of nexts) {
+        if (!seen.has(n)) {
+          stack.push(n);
+        }
+      }
+    }
+
+    return count;
+  }
+
   function angleBetween(a, b, c) {
-    // angle at node b between a -> b -> c
     if (!a) return 0;
 
-    const v1 = {
-      x: b.x - a.x,
-      y: b.y - a.y
-    };
-    const v2 = {
-      x: c.x - b.x,
-      y: c.y - b.y
-    };
+    const v1 = { x: b.x - a.x, y: b.y - a.y };
+    const v2 = { x: c.x - b.x, y: c.y - b.y };
 
     const dot = v1.x * v2.x + v1.y * v2.y;
     const mag1 = Math.hypot(v1.x, v1.y);
@@ -288,21 +303,33 @@ function assignSCIDs() {
     const scored = neighbors.map(n => {
       const next = poles.get(n);
 
-      // ✅ angle priority (STRAIGHT = BEST)
       const angle = angleBetween(prev, current, next);
-
-      // ✅ distance fallback
       const dist = Math.hypot(next.x - current.x, next.y - current.y);
 
-      return { id: n, angle, dist };
+      const size = branchLength(n, currentId);
+
+      return {
+        id: n,
+        angle,
+        dist,
+        size
+      };
     });
 
-    // ✅ KEY SORT: angle first, then distance
+    // ✅ FINAL SORT (Katapult-like)
     scored.sort((a, b) => {
-      if (Math.abs(a.angle - b.angle) > 0.01) {
-        return a.angle - b.angle; // smaller angle = straighter
+      // 1️⃣ smallest branch FIRST
+      if (a.size !== b.size) {
+        return a.size - b.size;
       }
-      return a.dist - b.dist; // then shortest
+
+      // 2️⃣ then straightness
+      if (Math.abs(a.angle - b.angle) > 0.01) {
+        return a.angle - b.angle;
+      }
+
+      // 3️⃣ then distance fallback
+      return a.dist - b.dist;
     });
 
     for (const s of scored) {
@@ -314,12 +341,11 @@ function assignSCIDs() {
 
   traverse(scidRootId);
 
-  // include any missed poles (rare)
+  // fallback (rare)
   poles.forEach((_, id) => {
     if (!visited.has(id)) order.push(id);
   });
 
-  // assign SCIDs
   order.forEach((id, i) => {
     poles.get(id).scid = String(i + 1).padStart(PAD, "0");
   });
