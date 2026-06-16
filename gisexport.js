@@ -316,21 +316,23 @@ function assignSCIDs() {
       };
     });
 
-    // ✅ FINAL SORT (Katapult-like)
-    scored.sort((a, b) => {
-      // 1️⃣ smallest branch FIRST
-      if (a.size !== b.size) {
-        return a.size - b.size;
-      }
+// ✅ FINAL Katapult-like sort
+scored.sort((a, b) => {
 
-      // 2️⃣ then straightness
-      if (Math.abs(a.angle - b.angle) > 0.01) {
-        return a.angle - b.angle;
-      }
+  // 1️⃣ smallest branch first
+  if (a.size !== b.size) {
+    return a.size - b.size;
+  }
 
-      // 3️⃣ then distance fallback
-      return a.dist - b.dist;
-    });
+  // ✅ 2️⃣ shortest span FIRST (fixes skip-span poles)
+  if (Math.abs(a.dist - b.dist) > 0.01) {
+    return a.dist - b.dist;
+  }
+
+  // 3️⃣ straightest continuation
+  return a.angle - b.angle;
+});
+
 
     for (const s of scored) {
       if (!visited.has(s.id)) {
