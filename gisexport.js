@@ -234,10 +234,96 @@
   }
 
   /* ================= SCID ================= */
-  function assignSCIDs(){
-    let i=1;
-    poles.forEach(p=>p.scid=String(i++).padStart(PAD,"0"));
+function buildAdjacency() {
+  const adj = new Map();
+
+  function add(a, b) {
+    if (!adj.has(a)) adj.set(a, new Set());
+    if (!adj.has(b)) adj.set(b, new Set());
+    adj.get(a).add(b);
+    adj.get(b).add(a);
   }
+
+  buildRefs().forEach(r => add(r.from, r.to));
+  return adj;
+}
+  
+function assignSCIDs() {
+  const adjacency = buildAdjacency();
+  const visited = new Set();
+  const order = [];
+
+  function angleBetween(a, b, c) {
+    // angle at node b between a -> b -> c
+    if (!a) return 0;
+
+    const v1 = {
+      x: b.x - a.x,
+      y: b.y - a.y
+    };
+    const v2 = {
+      x: c.x - b.x,
+      y: c.y - b.y
+    };
+
+    const dot = v1.x * v2.x + v1.y * v2.y;
+    const mag1 = Math.hypot(v1.x, v1.y);
+    const mag2 = Math.hypot(v2.x, v2.y);
+
+    if (mag1 === 0 || mag2 === 0) return Math.PI;
+
+    return Math.acos(dot / (mag1 * mag2));
+  }
+
+  function traverse(currentId, parentId = null, prevId = null) {
+    visited.add(currentId);
+    order.push(currentId);
+
+    const neighbors = [...(adjacency.get(currentId) || [])]
+      .filter(n => n !== parentId);
+
+    const current = poles.get(currentId);
+    const prev = prevId ? poles.get(prevId) : null;
+
+    const scored = neighbors.map(n => {
+      const next = poles.get(n);
+
+      // ✅ angle priority (STRAIGHT = BEST)
+      const angle = angleBetween(prev, current, next);
+
+      // ✅ distance fallback
+      const dist = Math.hypot(next.x - current.x, next.y - current.y);
+
+      return { id: n, angle, dist };
+    });
+
+    // ✅ KEY SORT: angle first, then distance
+    scored.sort((a, b) => {
+      if (Math.abs(a.angle - b.angle) > 0.01) {
+        return a.angle - b.angle; // smaller angle = straighter
+      }
+      return a.dist - b.dist; // then shortest
+    });
+
+    for (const s of scored) {
+      if (!visited.has(s.id)) {
+        traverse(s.id, currentId, currentId);
+      }
+    }
+  }
+
+  traverse(scidRootId);
+
+  // include any missed poles (rare)
+  poles.forEach((_, id) => {
+    if (!visited.has(id)) order.push(id);
+  });
+
+  // assign SCIDs
+  order.forEach((id, i) => {
+    poles.get(id).scid = String(i + 1).padStart(PAD, "0");
+  });
+}
 
   /* ================= EXPORT ================= */
   function buildRefs(){
