@@ -206,6 +206,8 @@
     poles.clear(); conductorFeatures=[];
 
     // ✅ FIXED POLE URL
+    console.log(`Token =${MAP_TOKEN}`);
+    
     const poleUrl =
       `${BASE_URL}/${POLE_LAYER}/query` +
       `?where=1=1&outFields=*&returnGeometry=true&geometryType=esriGeometryPolygon` +
