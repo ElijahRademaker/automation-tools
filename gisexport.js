@@ -392,12 +392,12 @@ scored.sort((a, b) => {
       pCsv+=`pole,${p.owner}::${p.id}::True,${ll.lat},${ll.lon},${p.scid}\n`;
     });
 
-    let cCsv="connection_type,reference_type,latitude1,longitude1,latitude2,longitude2\n";
+    let cCsv="connection_type,latitude1,longitude1,latitude2,longitude2\n";
 
     buildRefs().forEach(r=>{
       const a=latlon(poles.get(r.from));
       const b=latlon(poles.get(r.to));
-      cCsv+=`reference,power reference,${a.lat},${a.lon},${b.lat},${b.lon}\n`;
+      cCsv+=`aerial cable,${a.lat},${a.lon},${b.lat},${b.lon}\n`;
     });
 
     download("scid_poles.csv",pCsv);
