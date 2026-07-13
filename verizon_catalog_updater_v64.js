@@ -7,7 +7,16 @@
    - Per-device Color Sort # row
    - Workbook filename: Verizon_Catalog_MM-DD-YY.xls
 
-   Bookmarklet: javascript:(async function(){try{const r=await fetch('https://raw.githubusercontent.com/ElijahRademaker/automation-tools/refs/heads/main/verizoncheck?t=%27+Date.now());eval(await r.text());}catch(e){alert(%27Verizon Catalog Updater failed to load%27);console.error(e);}})();
+   Bookmarklet: 
+   javascript:(async function(){
+try{
+const r=await fetch('https://raw.githubusercontent.com/ElijahRademaker/automation-tools/main/verizon_catalog_updater_v64.js?t='+Date.now());
+eval(await r.text());
+}catch(e){
+alert('Verizon Catalog Updater failed to load');
+console.error(e);
+}
+})();
 */
 const CFG={timeoutMs:45000,readyMs:14000,settleMs:650,afterClickMs:750,maxUrls:150,saveKey:'vz_availability_v64_state',debug:true};
 const DEFAULT_URLS=[
