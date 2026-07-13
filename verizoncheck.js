@@ -9,7 +9,7 @@
    - Workbook filename: Verizon_Catalog_MM-DD-YY.xls
 
    Bookmarklet:
-   javascript:(async()=>{const r=await fetch('https://raw.githubusercontent.com/ElijahRademaker/automation-tools/main/verizon_catalog_updater.js?t='+Date.now());const t=await r.text();console.log(t);})();
+   javascript:(async function(){try{const u='https://raw.githubusercontent.com/ElijahRademaker/automation-tools/main/verizoncheck.js?t=%27+Date.now();const r=await fetch(u,{cache:%27no-store%27});if(!r.ok)throw new Error(%27HTTP %27+r.status+%27 %27+r.statusText);const code=await r.text();console.log(%27Loaded Verizon Catalog Updater:%27,u);console.log(code.slice(0,300));(0,eval)(code);}catch(e){alert(%27Verizon Catalog Updater failed to load/run: %27+(e.message||e));console.error(e);}})();
 */
 const CFG={
     timeoutMs:45000, readyMs:14000, settleMs:650, afterClickMs:750, maxUrls:150, saveKey:'vz_availability_v64_state', debug:true
