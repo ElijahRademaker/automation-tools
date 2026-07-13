@@ -1,5 +1,5 @@
 (async()=>{
-/* Verizon Availability Scanner stable_v4
+/* Verizon Availability Scanner stable_v4.1
    - Multiple URLs separated by commas/newlines
    - Progress overlay + CSV export
    - Storage stock is parsed per-capacity, not from the whole storage group
