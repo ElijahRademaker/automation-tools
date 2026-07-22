@@ -1,6 +1,6 @@
 /**
- * EAM Design Doc CU Importer — v1.19.21 (CSV-only)
- * Last Updated: 2026-04-9
+ * EAM Design Doc CU Importer — v1.20.2
+ * Last Updated: 2026-07-22
  * Made by Elijah Rademaker - erademaker@trccompanies.com
  * To-Do:
  * - Look into the ModifyDD network call to bulk instant add via the save function called by SAP in the Network sources.
@@ -9,7 +9,7 @@
 (function () {
 
   // Root and State
-const IMPORTER_VERSION = '1.19.23';
+const IMPORTER_VERSION = '1.20.2';
 
 // PAGE-WIDE DARK MODE
 (function(){
@@ -422,12 +422,39 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
     return s;
   }
 
+  // v1.20.2: preserve the imported location name exactly as typed by the user.
+  // normalizeLocationName remains only as a legacy fallback for older files that used L001 ALT1 naming.
+  function preserveImportedLocationName(input){
+    return String(input == null ? '' : input).trim().replace(/\s+/g, ' ');
+  }
+  function locationCompareKey(input){
+    return preserveImportedLocationName(input).toUpperCase();
+  }
+
   function findLocationRowExact(locationName){
-    const name = normalizeLocationName(locationName);
+    const rawName = preserveImportedLocationName(locationName);
+    const rawKey = locationCompareKey(rawName);
+    const legacyName = normalizeLocationName(locationName);
+    const legacyKey = locationCompareKey(legacyName);
     const parents = Array.from(document.querySelectorAll('tr.cu_Parent'));
-    let hit = parents.find(r => r.querySelector('.tblCUITXTEditable')?.textContent.trim().toUpperCase() === name);
+
+    // First, match the exact imported/user-facing location name.
+    let hit = parents.find(r => locationCompareKey(r.querySelector('.tblCUITXTEditable')?.textContent || '') === rawKey);
     if (hit) return hit;
-    return parents.find(r => (r.querySelector('.tblCUITXTEditable')?.textContent || '').trim().toUpperCase().includes(name));
+
+    // Legacy fallback for old files that intentionally used L001 ALT1 style names.
+    if (legacyKey && legacyKey !== rawKey){
+      hit = parents.find(r => locationCompareKey(r.querySelector('.tblCUITXTEditable')?.textContent || '') === legacyKey);
+      if (hit) return hit;
+    }
+
+    // Last-resort contains checks, raw first, then legacy.
+    hit = parents.find(r => rawKey && locationCompareKey(r.querySelector('.tblCUITXTEditable')?.textContent || '').includes(rawKey));
+    if (hit) return hit;
+    if (legacyKey && legacyKey !== rawKey){
+      return parents.find(r => locationCompareKey(r.querySelector('.tblCUITXTEditable')?.textContent || '').includes(legacyKey)) || null;
+    }
+    return null;
   }
 
   function getDirectRowsUnderParent(parentGuid){
@@ -627,7 +654,7 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
 
   async function addCU_byFetchAndDrag(locationName, cuNumber, options = {}){
     const { qty=null, action=null, updateIfExists=true, timeoutMs=9000 } = options;
-    const locName = normalizeLocationName(locationName);
+    const locName = preserveImportedLocationName(locationName);
     const parentRow = findLocationRowExact(locName);
     if (!parentRow){ console.error('Location not found:', locName); return false; }
 
@@ -742,7 +769,7 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
 
   function normalizeJobFromCsvRow(row){
     const get = (k) => row[k] ?? row[k?.toUpperCase?.()] ?? row[k?.toLowerCase?.()] ?? '';
-    const loc       = normalizeLocationName(get('Location'));
+    const loc       = preserveImportedLocationName(get('Location'));
     const cuRaw     = get('CU');
     const qtyRaw    = get('Qty');
     const actionRaw = get('Action');
@@ -774,7 +801,7 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
 
   function validateJobFormat(job){
     const errors = [];
-    if (!/^L\d{3}\sALT\d+$/.test(job.location)) errors.push('Location must be like "L001 ALT1"');
+    if (!job.location) errors.push('Location is required');
     if (!/^\d{3,}$/.test(job.cu)) errors.push('CU must be digits (e.g., 100417)');
     if (job.qty != null && (!Number.isFinite(job.qty) || job.qty < 0)) errors.push('Qty must be a non-negative number');
     if (!job.action) errors.push('Action is required (INSTALL or RET REM)');
@@ -870,7 +897,7 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
             <input type="file" id="__cu_csv" accept=".csv" style="flex:1;" />
           </div>
-          <small style="opacity:.8">CSV columns: Location, CU, Qty, Action, CMPLX</small>
+          <small style="opacity:.8">CSV columns: Location, CU, Qty, Action, CMPLX, Parent CU, Child CU, Child Qty</small>
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap">
@@ -991,7 +1018,10 @@ const { preview } = await (async function(){
           const errs = p.errors?.length ? `<div style=\"color:#ffb4b4\">${p.errors.join('; ')}<\/div>` : '';
           const okBadge = p.valid ? '<span style=\"color:#9f9\">VALID<\/span>' : '<span style=\"color:#f99\">INVALID<\/span>';
           const desc = p.valid && p.description ? `<div style=\"color:#bbb; font-size:11px; font-style:italic; margin-top:2px\">${p.description.replace(/</g,'<')}<\/div>` : '';
-          return `\n<tr>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.idx}<br>${desc}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.location}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">CU${p.cu}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.qty ?? ''}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.action ?? ''}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${okBadge}${errs}<\/td>\n<\/tr>`;
+          const cuDisplay = p.type === 'cmplx' ? 'LOCATION CMPLX' : (p.type === 'assembly-child' ? ('Child CU' + (p.childCu || p.cu || '')) : (p.cu ? ('CU' + p.cu) : ''));
+          const qtyDisplay = p.type === 'cmplx' ? p.cmplx : (p.qty ?? '');
+          const actionDisplay = p.type === 'cmplx' ? 'SET COMPLEXITY' : (p.action ?? '');
+          return `\n<tr>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.idx}<br>${desc}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${p.location}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${cuDisplay}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${qtyDisplay}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${actionDisplay}<\/td>\n <td style=\"padding:6px 4px; border-bottom:1px solid #222\">${okBadge}${errs}<\/td>\n<\/tr>`;
         }).join('');
 
         box.innerHTML = `\n<table style=\"width:100%; border-collapse:collapse; font-size:12px\">\n<thead><tr>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">#<\/th>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">Location<\/th>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">CU<\/th>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">Qty<\/th>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">Action<\/th>\n<th style=\"text-align:left; border-bottom:1px solid #333; padding:4px\">Status<\/th>\n<\/tr><\/thead><tbody>${rowsHtml}<\/tbody><\/table>`;
@@ -1107,16 +1137,33 @@ const { preview } = await (async function(){
   ROOT.addCUs_byFetchAndDrag  = addCUs_byFetchAndDrag;
   ROOT.addByMap_byFetchAndDrag= addByMap_byFetchAndDrag;
   ROOT.showCUOverlay  = showCUOverlay;
+  ROOT.findAssemblyChildRow = typeof findAssemblyChildRow === 'function' ? findAssemblyChildRow : ROOT.findAssemblyChildRow;
+  ROOT.setAssemblyChildQty = typeof setAssemblyChildQty === 'function' ? setAssemblyChildQty : ROOT.setAssemblyChildQty;
 
 // This block overrides previewCsvJobs/runJobs and adds CMPLX support + badge without touching
 // earlier code paths. It lives inside the same IIFE so it can reuse helpers already defined above.
 
-// --- Helpers: delimiter auto-detect + simple split (Excel/Sheets exports)
+// --- Helpers: delimiter auto-detect + CSV/TSV split (Excel/Sheets exports)
 function __cmplx_detectDelim(header){ return (header && header.indexOf('\t') !== -1) ? '\t' : ','; }
-function __cmplx_split(line, delim){ return String(line).split(delim).map(function(s){ return s.trim(); }); }
+function __cmplx_split(line, delim){
+  if (delim === '\t') return String(line||'').split('\t').map(function(s){ return s.trim(); });
+  var out = [], cur = '', inQuotes = false;
+  var s = String(line||'');
+  for (var i=0;i<s.length;i++){
+    var ch = s.charAt(i), next = s.charAt(i+1);
+    if (ch === '"'){
+      if (inQuotes && next === '"'){ cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes){
+      out.push(cur.trim()); cur = '';
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
 function parseCsvAuto(text){
   var t = String(text||'').replace(/\r\n?/g,'\n');
-  var lines = t.split('\n').filter(function(l){ return l.length>0; });
+  var lines = t.split('\n').filter(function(l){ return l.trim().length>0; });
   if (!lines.length) return { headers: [], rows: [] };
   var delim = __cmplx_detectDelim(lines[0]);
   var headers = __cmplx_split(lines[0], delim);
@@ -1130,13 +1177,46 @@ function parseCsvAuto(text){
   return { headers: headers, rows: rows };
 }
 
+function __cu_getLoose(row){
+  var map = Object.create(null);
+  Object.keys(row||{}).forEach(function(k){ map[String(k).toLowerCase().replace(/[^a-z0-9]/g,'')] = row[k]; });
+  return function(){
+    for (var i=0;i<arguments.length;i++){
+      var key = String(arguments[i]||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+      if (Object.prototype.hasOwnProperty.call(map, key)) return map[key];
+    }
+    return '';
+  };
+}
+
 function normalizeJobFromCsvRow2(row){
-  function get(k){ return row[k] || row[(k||'').toUpperCase()] || row[(k||'').toLowerCase()] || ''; }
-  var loc = normalizeLocationName(get('Location'));
+  var get = (typeof __cu_getLoose === 'function') ? __cu_getLoose(row) : function(k){ return row[k] || row[(k||'').toUpperCase()] || row[(k||'').toLowerCase()] || ''; };
+  var loc = preserveImportedLocationName(get('Location','Loc'));
   var cuRaw = get('CU');
   var qtyRaw = get('Qty');
   var actionRaw = get('Action');
   var cmplxRaw = get('CMPLX');
+  var parentCuRaw = get('Parent CU','ParentCU','Assembly CU','AssemblyCU');
+  // Parent Instance intentionally removed: importer assumes only one assembly CU per location.
+  var parentInstanceRaw = '';
+  var childCuRaw = get('Child CU','ChildCU','Level 4 CU','Level4CU','L4 CU','L4CU');
+  var childQtyRaw = String(get('Child Qty','ChildQty','Level 4 Qty','Level4Qty','L4 Qty','L4Qty')||'').replace(/,/g,'').trim();
+  var parentCu = normalizeDigits(parentCuRaw);
+  var childCu = normalizeDigits(childCuRaw);
+  var hasAssemblyFields = !!(parentCu || parentInstanceRaw || childCu || childQtyRaw);
+  if (hasAssemblyFields){
+    return {
+      type:'assembly-child',
+      location: loc,
+      parentCu: parentCu,
+      parentInstance: parentInstanceRaw === '' ? null : Number(parentInstanceRaw),
+      childCu: childCu,
+      childQty: childQtyRaw === '' ? null : Number(childQtyRaw),
+      cu: childCu,
+      qty: childQtyRaw === '' ? null : Number(childQtyRaw),
+      action: 'ASSEMBLY CHILD QTY'
+    };
+  }
   var cuDigits = String(cuRaw||'').trim();
   var cmplxVal = String(cmplxRaw||'').replace(/,/g,'').trim();
   var cmplxNum = cmplxVal !== '' ? Number(cmplxVal) : null;
@@ -1147,9 +1227,15 @@ function normalizeJobFromCsvRow2(row){
 
 function validateJobFormat2(job){
   var errors = [];
-  if (!/^L\d{3}\sALT\d+$/.test(job.location)) errors.push('Location must be like "L001 ALT1"');
+  if (!job.location) errors.push('Location is required');
   if (job.type === 'cmplx'){
     if (!(typeof job.cmplx === 'number' && isFinite(job.cmplx))) errors.push('CMPLX must be a number');
+    return errors;
+  }
+  if (job.type === 'assembly-child'){
+    if (!/^\d{3,}$/.test(job.parentCu)) errors.push('Parent CU must be digits (e.g., 505040)');
+    if (!/^\d{3,}$/.test(job.childCu)) errors.push('Child CU must be digits (e.g., 100194)');
+    if (job.childQty == null || !isFinite(job.childQty) || job.childQty < 0) errors.push('Child Qty must be a non-negative number');
     return errors;
   }
   if (!/^\d{3,}$/.test(job.cu)) errors.push('CU must be digits (e.g., 100417)');
@@ -1159,14 +1245,30 @@ function validateJobFormat2(job){
 }
 
 function findLocationRowLevel2Exact(locationName){
-  var name = normalizeLocationName(locationName);
+  var rawName = preserveImportedLocationName(locationName);
+  var rawKey = locationCompareKey(rawName);
+  var legacyName = normalizeLocationName(locationName);
+  var legacyKey = locationCompareKey(legacyName);
   var parents = Array.prototype.slice.call(document.querySelectorAll('tr.cu_Parent'));
+
+  // First, exact user/imported location name match.
   for (var i=0;i<parents.length;i++){
     var tr = parents[i];
     var lvl = Number(((tr.querySelector('td.level')||{}).textContent||'').trim());
     if (lvl !== 2) continue;
-    var txt = ((tr.querySelector('td.tblCUITXTEditable')||{}).textContent||'').trim().toUpperCase();
-    if (txt === name) return tr;
+    var txt = locationCompareKey(((tr.querySelector('td.tblCUITXTEditable')||{}).textContent||''));
+    if (txt === rawKey) return tr;
+  }
+
+  // Legacy fallback for existing L001 ALT1 rows only.
+  if (legacyKey && legacyKey !== rawKey){
+    for (var j=0;j<parents.length;j++){
+      var tr2 = parents[j];
+      var lvl2 = Number(((tr2.querySelector('td.level')||{}).textContent||'').trim());
+      if (lvl2 !== 2) continue;
+      var txt2 = locationCompareKey(((tr2.querySelector('td.tblCUITXTEditable')||{}).textContent||''));
+      if (txt2 === legacyKey) return tr2;
+    }
   }
   return null;
 }
@@ -1213,9 +1315,101 @@ async function setComplexityOnParent(locationName, factor){
 }
 
 
+// === Assembly child quantity support ===
+function __asm_toCUName(cu){ var d = normalizeDigits(cu); return d ? ('CU' + d).toUpperCase() : ''; }
+function __asm_rowContainsCU(tr, cu){
+  var wanted = __asm_toCUName(cu);
+  if (!tr || !wanted) return false;
+  try {
+    var dc = tr.getAttribute('data-copy') || (tr.dataset && tr.dataset.copy);
+    if (dc && __asm_toCUName(dc) === wanted) return true;
+  } catch(e){}
+  try {
+    var cells = Array.prototype.slice.call(tr.querySelectorAll('td'));
+    for (var i=0;i<cells.length;i++){
+      var text = String(cells[i].textContent||'').toUpperCase();
+      if (new RegExp('\\b' + wanted + '\\b').test(text)) return true;
+    }
+  } catch(e){}
+  return false;
+}
+function __asm_rowLevel(tr){
+  var n = Number(((tr && tr.querySelector('td.level')) ? tr.querySelector('td.level').textContent : '').trim());
+  return isFinite(n) ? n : null;
+}
+function findAssemblyRows(locationName, parentCu){
+  var locRow = findLocationRowLevel2Exact(locationName);
+  if (!locRow) return [];
+  var locGuid = locRow.dataset && locRow.dataset.cuguid;
+  return getDirectRowsUnderParent(locGuid).filter(function(tr){ return __asm_rowLevel(tr) === 3 && __asm_rowContainsCU(tr, parentCu); });
+}
+function pickAssemblyRow(locationName, parentCu, parentInstance){
+  var matches = findAssemblyRows(locationName, parentCu);
+  if (!matches.length) return { row:null, matches:matches, error:'Parent assembly not found under location' };
+  if (parentInstance != null && parentInstance !== ''){
+    var idx = Number(parentInstance) - 1;
+    if (!isFinite(idx) || Math.floor(idx) !== idx || idx < 0) return { row:null, matches:matches, error:'Parent Instance must be a positive whole number' };
+    if (!matches[idx]) return { row:null, matches:matches, error:'Parent Instance exceeds number of matching assemblies' };
+    return { row:matches[idx], matches:matches, error:null };
+  }
+  if (matches.length > 1) console.warn('Assembly child qty: multiple matching parent assemblies found under location; using first match by row order.', locationName, parentCu);
+  return { row:matches[0], matches:matches, error:null };
+}
+function findAssemblyChildRow(locationName, parentCu, parentInstance, childCu){
+  var picked = pickAssemblyRow(locationName, parentCu, parentInstance);
+  if (!picked.row) return { row:null, error:picked.error, parentMatches:picked.matches || [] };
+  var assemblyGuid = picked.row.dataset && picked.row.dataset.cuguid;
+  var children = getDirectRowsUnderParent(assemblyGuid).filter(function(tr){ return __asm_rowLevel(tr) === 4 && __asm_rowContainsCU(tr, childCu); });
+  if (!children.length) return { row:null, error:'Child CU not found under parent assembly', parentMatches:picked.matches, childMatches:children };
+  if (children.length > 1) return { row:null, error:'Multiple matching child CUs found under parent assembly', parentMatches:picked.matches, childMatches:children };
+  return { row:children[0], error:null, parentMatches:picked.matches, childMatches:children };
+}
+async function waitForAssemblyChildRow(locationName, parentCu, parentInstance, childCu, timeoutMs){
+  var deadline = Date.now() + (timeoutMs || 15000);
+  var last = null;
+  while (Date.now() < deadline){
+    last = findAssemblyChildRow(locationName, parentCu, parentInstance, childCu);
+    if (last.row) return last;
+    await sleep(150);
+  }
+  return last || { row:null, error:'Timed out waiting for assembly child row' };
+}
+function showAssemblyChildBadge(tr, job){
+  try{
+    tr.style.outline = '2px solid #20c997';
+    tr.setAttribute('data-assembly-child-qty-applied','1');
+    var old = tr.querySelector('div.__asm_child_qty_badge'); if (old) old.remove();
+    var badge = document.createElement('div');
+    badge.className = '__asm_child_qty_badge';
+    badge.textContent = __asm_toCUName(job.childCu) + ' Qty ' + job.childQty + ' applied';
+    badge.style.cssText = 'position:absolute;right:4px;top:4px;background:#20c997;color:#051b11;padding:2px 6px;font-size:11px;border-radius:4px;opacity:1;pointer-events:none;z-index:9999;font-weight:600;';
+    tr.style.position = tr.style.position || 'relative';
+    tr.appendChild(badge);
+    setTimeout(function(){ try{ badge.remove(); tr.style.outline=''; }catch(e){} }, 3500);
+  }catch(e){}
+}
+async function setAssemblyChildQty(job, opts){
+  var found = await waitForAssemblyChildRow(job.location, job.parentCu, job.parentInstance, job.childCu, (opts && opts.assemblyChildTimeoutMs) || 15000);
+  if (!found.row){ console.warn('Assembly child target not found', job, found.error); return false; }
+  var ok = await setQuantityOnRow_exact(found.row, job.childQty);
+  if (ok) showAssemblyChildBadge(found.row, job);
+  return ok;
+}
+function validateAssemblyJobAgainstPreview(job, allJobs){
+  var errors = [];
+  if (job.type !== 'assembly-child') return errors;
+  var existingParents = findAssemblyRows(job.location, job.parentCu);
+  var plannedParents = (allJobs||[]).filter(function(j){ return j && j.type === 'cu' && j.location === job.location && normalizeDigits(j.cu) === normalizeDigits(job.parentCu); });
+  var totalPossibleParents = existingParents.length + plannedParents.length;
+  if (totalPossibleParents === 0) errors.push('Parent assembly was not found and is not being added in this import');
+  return errors;
+}
+
+
 // === Preview-time Location Creation via Add Virtual CU ===
 function previewEnsureLocation(locationName){
-  var name = normalizeLocationName(locationName);
+  // v1.20.2: Create the location exactly as written in the Excel/CSV Location column.
+  var name = preserveImportedLocationName(locationName);
   if (findLocationRowLevel2Exact(name)) return Promise.resolve(true);
 
   var btn = document.getElementById('AddVirtual');
@@ -1252,7 +1446,13 @@ previewCsvJobs = function(csvText, opts){
     for (var i=0;i<rows.length;i++){ jobs.push(normalizeJobFromCsvRow2(rows[i])); }
     if (!(await previewEnsureAllLocations(jobs))){ alert('Preview failed creating required locations.'); return { headers: parsed.headers, preview: [] }; }
     var unique = [], seen = Object.create(null);
-    for (var j=0;j<jobs.length;j++){ var jj = jobs[j]; if (jj.type==='cu'){ var d = normalizeDigits(jj.cu); if (d && !seen[d]){ seen[d]=true; unique.push(d); } } }
+    for (var j=0;j<jobs.length;j++){
+      var jj = jobs[j];
+      if (jj.type==='cu'){
+        var d = normalizeDigits(jj.cu);
+        if (d && !seen[d]){ seen[d]=true; unique.push(d); }
+      }
+    }
     try { OLog.info('Preview: unique CU candidates = '+unique.length); } catch(e){}
     var okMap = Object.create(null), descMap = Object.create(null);
     if (unique.length){
@@ -1261,7 +1461,7 @@ previewCsvJobs = function(csvText, opts){
         try{ var cu = unique[u]; var ok = await validateCUExists(cu); okMap[cu] = !!ok; descMap[cu] = ok ? (await getCUDescriptionIfValid(cu)) : ''; try { OLog.info('Validated CU '+cu+' => '+(ok?'OK':'MISS')); } catch(e){} }catch(e){ okMap[unique[u]] = false; descMap[unique[u]]=''; }
       }
       try { OLog.info('Preview: validated '+unique.length+' / '+unique.length+' unique CUs'); } catch(e){}
-    } else { try { OLog.info('Preview: complexity-only import (0 CUs to validate)'); } catch(e){} }
+    } else { try { OLog.info('Preview: no standard CU rows to validate'); } catch(e){} }
     for (var k=0;k<jobs.length;k++){
       if (opts.onPreviewProgress) { try { opts.onPreviewProgress(k+1, jobs.length); } catch(e){} }
       var j = jobs[k]; var errs = validateJobFormat2(j); var desc = '';
@@ -1270,8 +1470,33 @@ previewCsvJobs = function(csvText, opts){
         var ok = (unique.length ? !!okMap[digits] : true);
         if (!ok) errs.push('CU not found by strict CUCU search');
         if (ok && errs.length===0){ desc = descMap[digits] || ''; }
+      } else if (j.type === 'cmplx'){
+        if (errs.length === 0){ desc = 'Set location complexity factor to ' + j.cmplx + ' at ' + j.location; }
+      } else if (j.type === 'assembly-child'){
+        if (errs.length === 0){
+          var asmErrs = validateAssemblyJobAgainstPreview(j, jobs);
+          errs = errs.concat(asmErrs);
+        }
+        if (errs.length === 0){
+          desc = 'Set ' + __asm_toCUName(j.childCu) + ' Qty to ' + j.childQty + ' under ' + __asm_toCUName(j.parentCu) + ' at ' + j.location;
+        }
       }
-      preview.push({ idx:k+1, description: desc, valid: errs.length===0, errors: errs, location: j.location, type: j.type, cu: j.cu, qty: j.qty, action: j.action, cmplx: j.cmplx });
+      preview.push({
+        idx:k+1,
+        description: desc,
+        valid: errs.length===0,
+        errors: errs,
+        location: j.location,
+        type: j.type,
+        cu: j.type === 'cmplx' ? '' : (j.type === 'assembly-child' ? j.childCu : j.cu),
+        qty: j.type === 'cmplx' ? j.cmplx : (j.type === 'assembly-child' ? j.childQty : j.qty),
+        action: j.type === 'cmplx' ? 'SET COMPLEXITY' : (j.type === 'assembly-child' ? 'ASSEMBLY CHILD QTY' : j.action),
+        cmplx: j.cmplx,
+        parentCu: j.parentCu,
+        parentInstance: j.parentInstance,
+        childCu: j.childCu,
+        childQty: j.childQty
+      });
     }
     var rb=document.getElementById('__cu_run'); if(rb){ rb.disabled=false; rb.textContent='Run Import'; rb.classList.remove('__cu_btn_disabled'); } return { headers: parsed.headers, preview: preview };
   })();
@@ -1282,10 +1507,14 @@ previewCsvJobs = function(csvText, opts){
 runJobs = async function(previewRows, opts){ if(!previewRows||!previewRows.length){ alert('Run Preview first.'); return {ok:0,fail:0,total:0,invalids:[],failedDetails:[]}; }
   opts = opts || {}; var timeoutMs = opts.timeoutMs || 9000;
   var rows = (previewRows||[]).filter(function(r){ return r && r.valid; });
+  var structureRows = rows.filter(function(r){ return r.type !== 'assembly-child'; });
+  var assemblyRows = rows.filter(function(r){ return r.type === 'assembly-child'; });
   var ok=0, fail=0; var failedDetails=[];
   const startTime = Date.now();
-  for (var i=0;i<rows.length;i++){
-    var r = rows[i];
+
+  // Pass 1: create locations/normal CUs/assemblies and apply CMPLX.
+  for (var i=0;i<structureRows.length;i++){
+    var r = structureRows[i];
     try {
       if (r.type === 'cmplx'){
         var applied = await setComplexityOnParent(r.location, r.cmplx);
@@ -1300,6 +1529,20 @@ runJobs = async function(previewRows, opts){ if(!previewRows||!previewRows.lengt
       if (opts.onProgress) opts.onProgress({ row: r, ok: ok, fail: fail, error: e });
     }
   }
+
+  // Pass 2: after assemblies render, apply Level 4 child quantity overrides.
+  for (var a=0;a<assemblyRows.length;a++){
+    var ar = assemblyRows[a];
+    try {
+      var childApplied = await setAssemblyChildQty(ar, opts);
+      if (childApplied) ok++; else { fail++; failedDetails.push(ar); }
+      if (opts.onProgress) opts.onProgress({ row: ar, ok: ok, fail: fail });
+    } catch(e){
+      fail++; failedDetails.push(ar);
+      if (opts.onProgress) opts.onProgress({ row: ar, ok: ok, fail: fail, error: e });
+    }
+  }
+
   var invalids = (previewRows||[]).filter(function(r){ return !r.valid; });
 
 try {
@@ -1330,7 +1573,7 @@ const durationSec = durationMs / 1000;
 const linesPerSecond = ok > 0 ? ok / durationSec : 0;
 
 
-  console.log("LOG DATA:", { ok, jobId, user, durationSec }); // 👈 DEBUG
+  console.log("LOG DATA:", { ok, jobId, user, durationSec, assemblyChildRows: assemblyRows.length });
 
 const url =
   "https://script.google.com/macros/s/AKfycbzaKkGw9VZravpiz2Bf-dAqRBsEq5Z6PptRKigVhCmxpDcbcI9c7_ArZdsaaeBKiUdZNA/exec" +
@@ -1347,11 +1590,11 @@ new Image().src = url;
   console.warn("Logging failed", e);
 }
 
-return { ok: ok, fail: fail, total: rows.length, invalids: invalids, failedDetails: failedDetails };
+return { ok: ok, fail: fail, total: rows.length, invalids: invalids, failedDetails: failedDetails, assemblyChildQty: { total: assemblyRows.length } };
 };
 
 // Also expose the overrides to ROOT for external callers
-try { ROOT.previewCsvJobs = previewCsvJobs; ROOT.runJobs = runJobs; } catch(e){}
+try { ROOT.previewCsvJobs = previewCsvJobs; ROOT.runJobs = runJobs; ROOT.findAssemblyChildRow = findAssemblyChildRow; ROOT.setAssemblyChildQty = setAssemblyChildQty; } catch(e){}
 
 (function(){
   var CMPLX_BADGES = new Set();
