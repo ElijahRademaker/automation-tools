@@ -1,5 +1,5 @@
 /**
- * EAM Design Doc CU Importer — v1.20.2
+ * EAM Design Doc CU Importer — v1.20.3
  * Last Updated: 2026-07-22
  * Made by Elijah Rademaker - erademaker@trccompanies.com
  * To-Do:
@@ -9,7 +9,7 @@
 (function () {
 
   // Root and State
-const IMPORTER_VERSION = '1.20.2';
+const IMPORTER_VERSION = '1.20.3';
 
 // PAGE-WIDE DARK MODE
 (function(){
@@ -897,7 +897,7 @@ function __normName(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
             <input type="file" id="__cu_csv" accept=".csv" style="flex:1;" />
           </div>
-          <small style="opacity:.8">CSV columns: Location, CU, Qty, Action, CMPLX, Parent CU, Child CU, Child Qty</small>
+          <small style="opacity:.8">CSV columns: Location, CU, Qty, Action, CMPLX, Parent CU, Parent Instance, Child CU, Child Qty</small>
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap">
@@ -1197,8 +1197,7 @@ function normalizeJobFromCsvRow2(row){
   var actionRaw = get('Action');
   var cmplxRaw = get('CMPLX');
   var parentCuRaw = get('Parent CU','ParentCU','Assembly CU','AssemblyCU');
-  // Parent Instance intentionally removed: importer assumes only one assembly CU per location.
-  var parentInstanceRaw = '';
+  var parentInstanceRaw = String(get('Parent Instance','ParentInstance','Assembly Instance','AssemblyInstance')||'').trim();
   var childCuRaw = get('Child CU','ChildCU','Level 4 CU','Level4CU','L4 CU','L4CU');
   var childQtyRaw = String(get('Child Qty','ChildQty','Level 4 Qty','Level4Qty','L4 Qty','L4Qty')||'').replace(/,/g,'').trim();
   var parentCu = normalizeDigits(parentCuRaw);
@@ -1234,6 +1233,7 @@ function validateJobFormat2(job){
   }
   if (job.type === 'assembly-child'){
     if (!/^\d{3,}$/.test(job.parentCu)) errors.push('Parent CU must be digits (e.g., 505040)');
+    if (job.parentInstance != null && (!isFinite(job.parentInstance) || job.parentInstance < 1 || Math.floor(job.parentInstance) !== Number(job.parentInstance))) errors.push('Parent Instance must be a positive whole number');
     if (!/^\d{3,}$/.test(job.childCu)) errors.push('Child CU must be digits (e.g., 100194)');
     if (job.childQty == null || !isFinite(job.childQty) || job.childQty < 0) errors.push('Child Qty must be a non-negative number');
     return errors;
@@ -1352,7 +1352,7 @@ function pickAssemblyRow(locationName, parentCu, parentInstance){
     if (!matches[idx]) return { row:null, matches:matches, error:'Parent Instance exceeds number of matching assemblies' };
     return { row:matches[idx], matches:matches, error:null };
   }
-  if (matches.length > 1) console.warn('Assembly child qty: multiple matching parent assemblies found under location; using first match by row order.', locationName, parentCu);
+  if (matches.length > 1) return { row:null, matches:matches, error:'Multiple matching parent assemblies found; specify Parent Instance' };
   return { row:matches[0], matches:matches, error:null };
 }
 function findAssemblyChildRow(locationName, parentCu, parentInstance, childCu){
@@ -1402,6 +1402,8 @@ function validateAssemblyJobAgainstPreview(job, allJobs){
   var plannedParents = (allJobs||[]).filter(function(j){ return j && j.type === 'cu' && j.location === job.location && normalizeDigits(j.cu) === normalizeDigits(job.parentCu); });
   var totalPossibleParents = existingParents.length + plannedParents.length;
   if (totalPossibleParents === 0) errors.push('Parent assembly was not found and is not being added in this import');
+  if (totalPossibleParents > 1 && (job.parentInstance == null || job.parentInstance === '')) errors.push('Multiple matching parent assemblies found or planned; specify Parent Instance');
+  if (job.parentInstance != null && totalPossibleParents > 0 && Number(job.parentInstance) > totalPossibleParents) errors.push('Parent Instance exceeds number of existing/planned matching assemblies');
   return errors;
 }
 
@@ -1478,7 +1480,7 @@ previewCsvJobs = function(csvText, opts){
           errs = errs.concat(asmErrs);
         }
         if (errs.length === 0){
-          desc = 'Set ' + __asm_toCUName(j.childCu) + ' Qty to ' + j.childQty + ' under ' + __asm_toCUName(j.parentCu) + ' at ' + j.location;
+          desc = 'Set ' + __asm_toCUName(j.childCu) + ' Qty to ' + j.childQty + ' under ' + __asm_toCUName(j.parentCu) + (j.parentInstance ? (' instance ' + j.parentInstance) : '') + ' at ' + j.location;
         }
       }
       preview.push({
