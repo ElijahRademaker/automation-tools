@@ -1,41 +1,136 @@
-document.addEventListener("DOMContentLoaded", () => {
-	document.getElementById("processButton").addEventListener("click", () => {
-	const fileInput = document.getElementById("fileInput");
-	const file = fileInput.files[0];
-	if (file) {
-		const reader = new FileReader();
-		reader.onload = function(event) {
-			try {
-				let jsonString = event.target.result;
-				jsonString = jsonString.replace(/"Temporary Traffic Control Plan Required":\s*,/g, '"Temporary Traffic Control Plan Required": "",');
-				jsonString = jsonString.replace("\"\t", "\"");
-				const jsonData = JSON.parse(jsonString);
-				chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-					const tabId = tabs[0].id;
-					chrome.scripting.executeScript({
-						target: { tabId: tabId },
-						func: readHeaders
-					}, (results) => {
-						const headers = results[0]?.result
-						chrome.scripting.executeScript({
-						target: { tabId: tabId },
-						func: manipulateDOM,
-						args: [jsonData, headers]
-						});
-					});
-				});
-			} catch (error) {
-				alert("Invalid JSON:", error);
-			}
+(async function SPIDAstudioAutofillBookmarklet() {
+    const MAX_PAGES = 100;
+    const PAGE_CHANGE_TIMEOUT_MS = 20000;
+
+    try {
+        const file = await selectJsonFile();
+        if (!file) return;
+
+        let jsonString = await file.text();
+        jsonString = jsonString.replace(
+            /"Temporary Traffic Control Plan Required":\s*,/g,
+            '"Temporary Traffic Control Plan Required": "",'
+        );
+        jsonString = jsonString.replace('"\\t', '"');
+
+        const jsonData = JSON.parse(jsonString);
+        if (!jsonData || typeof jsonData !== "object" || !jsonData.Poles) {
+            throw new Error('The selected JSON file does not contain a valid "Poles" object.');
+        }
+
+        const summary = {
+            pagesProcessed: 0,
+            foundPoles: 0,
+            missingPoles: [],
+            wrongStatusPoles: []
         };
-		
-		reader.readAsText(file);
-      } else {
-		alert("Please select a JSON file.");
-      }
-    });
-  });
-  
+
+        for (let pageNumber = 1; pageNumber <= MAX_PAGES; pageNumber++) {
+            const headers = readHeaders();
+            const pageResult = await processCurrentPage(jsonData, headers, pageNumber);
+            summary.pagesProcessed++;
+            summary.foundPoles += pageResult.foundPoles;
+            summary.missingPoles.push(...pageResult.missingPoles);
+            summary.wrongStatusPoles.push(...pageResult.wrongStatusPoles);
+
+            const nextPage = getNextPageControl();
+            if (!nextPage) break;
+
+            const oldFingerprint = getPageFingerprint();
+            nextPage.click();
+            await waitForPageChange(oldFingerprint);
+        }
+
+        if (summary.pagesProcessed >= MAX_PAGES && getNextPageControl()) {
+            throw new Error(`Stopped after ${MAX_PAGES} pages to prevent an infinite pagination loop.`);
+        }
+
+        const issues = [...new Set([...summary.missingPoles, ...summary.wrongStatusPoles])];
+        const details = issues.length ? `\n\n${issues.join("\n")}` : "";
+        alert(
+            `Finished SPIDAstudio Autofill\n` +
+            `Pages processed: ${summary.pagesProcessed}\n` +
+            `Matching poles processed: ${summary.foundPoles}` +
+            details
+        );
+    } catch (error) {
+        document.getElementById("spida-autofill-file-dialog")?.remove();
+        document.getElementById("spida-autofill-progress")?.remove();
+        console.error("SPIDAstudio Autofill failed:", error);
+        alert(`SPIDAstudio Autofill failed:\n\n${error?.message || error}`);
+    }
+
+    function selectJsonFile() {
+        return new Promise((resolve) => {
+            document.getElementById("spida-autofill-file-dialog")?.remove();
+            const dialog = document.createElement("div");
+            dialog.id = "spida-autofill-file-dialog";
+            Object.assign(dialog.style, {
+                position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)",
+                zIndex: "2147483647", display: "flex", alignItems: "center", gap: "10px",
+                padding: "12px 14px", border: "1px solid #a6a6a6", borderRadius: "6px",
+                background: "#fff", color: "#222", boxShadow: "0 4px 18px rgba(0,0,0,.25)",
+                font: "14px Arial,sans-serif", cursor: "default"
+            });
+            const message = document.createElement("span");
+            message.textContent = "Select the SPIDAstudio JSON file:";
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".json,application/json";
+            input.style.cursor = "pointer";
+            const cancel = document.createElement("button");
+            cancel.type = "button";
+            cancel.textContent = "Cancel";
+            cancel.style.cursor = "pointer";
+            let done = false;
+            const finish = (file) => {
+                if (done) return;
+                done = true;
+                document.removeEventListener("keydown", onKeydown, true);
+                dialog.remove();
+                resolve(file || null);
+            };
+            const onKeydown = (event) => { if (event.key === "Escape") finish(null); };
+            input.addEventListener("change", () => finish(input.files?.[0]));
+            cancel.addEventListener("click", () => finish(null));
+            document.addEventListener("keydown", onKeydown, true);
+            dialog.append(message, input, cancel);
+            (document.body || document.documentElement).appendChild(dialog);
+        });
+    }
+
+    function getNextPageControl() {
+        const current = document.querySelector("ul.pagination li.current");
+        if (!current) return null;
+        const nextItem = current.nextElementSibling;
+        if (!nextItem || nextItem.classList.contains("unavailable")) return null;
+        return nextItem.querySelector("a[data-ember-action], a");
+    }
+
+    function getPageFingerprint() {
+        const currentPage = document.querySelector("ul.pagination li.current")?.textContent?.trim() || "";
+        const rows = [...document.querySelectorAll("tr.data-row:not(.bulk-edit-row)")];
+        const rowText = rows.slice(0, 3).map((row) => row.textContent.trim()).join("|");
+        return `${currentPage}::${rows.length}::${rowText}`;
+    }
+
+    function waitForPageChange(oldFingerprint) {
+        return new Promise((resolve, reject) => {
+            const started = Date.now();
+            const check = () => {
+                if (getPageFingerprint() !== oldFingerprint && document.querySelector("tr.data-row:not(.bulk-edit-row)")) {
+                    requestAnimationFrame(() => requestAnimationFrame(resolve));
+                    return;
+                }
+                if (Date.now() - started >= PAGE_CHANGE_TIMEOUT_MS) {
+                    reject(new Error("The next page did not finish loading within 20 seconds."));
+                    return;
+                }
+                setTimeout(check, 150);
+            };
+            setTimeout(check, 150);
+        });
+    }
 
 function readHeaders(){
     const dictionary = {}
@@ -44,7 +139,7 @@ function readHeaders(){
 	for (const word of wordsToCheck) {
 	  if (!window.location.href.includes(word)) {
 		alert("Not on the correct page, go to SPIDAstudio Dashboard and select a project")
-		process.exit();
+		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
 	  }
 	}
 	
@@ -56,7 +151,7 @@ function readHeaders(){
 	});
 	if (!tableFound) {
 		alert("Not on the correct tab, go to table view")
-		process.exit();
+		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
 	}
 	
 	let stationRowsFound = false
@@ -67,7 +162,7 @@ function readHeaders(){
 	});
 	if (!stationRowsFound) {
 		alert("Select Station Rows")
-		process.exit();
+		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
 	}
 	
 	let editFound = false
@@ -78,7 +173,7 @@ function readHeaders(){
 	});
 	if (editFound) {
 		alert("Enable edit forms mode with the pencil icon")
-		process.exit();
+		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
 	}
 	
     for (let i = 1; i < document.querySelector('tr').cells.length; i++) {
@@ -119,7 +214,7 @@ if (row && row.cells && row.cells.length > 1) {
     return dictionary
 }
 
-async function manipulateDOM(jsonData, headers) {
+async function processCurrentPage(jsonData, headers, pageNumber) {
 	const invalidStatuses = [
 		"Field Engineering - Assignment",
 		"Pull Data from GIS"
@@ -249,8 +344,6 @@ async function manipulateDOM(jsonData, headers) {
 	}
 	
 	if (foundPoles > 0) {
-		alert(`${foundPoles} poles found for phase: ${currentPhase}.`);
-		
 		if (currentPhase === "One") {
 			if (jsonData["Inspected By"]) {
 				if (!document.querySelector('tr.data-row.bulk-edit-row').cells[headers["Inspected By"]].childNodes[2].childNodes[2].readyOnly) {
@@ -286,7 +379,9 @@ async function manipulateDOM(jsonData, headers) {
 		}
 	}
 
+	document.getElementById("spida-autofill-progress")?.remove();
 	const popup = document.createElement("div");
+	popup.id = "spida-autofill-progress";
 	popup.style.position = "fixed";
 	popup.style.top = "20px";
 	popup.style.left = "50%";
@@ -301,6 +396,10 @@ async function manipulateDOM(jsonData, headers) {
 	bar.max = foundPoles;
 	bar.style.width = "300px";
 
+	const progressText = document.createElement("div");
+	progressText.textContent = `Processing page ${pageNumber} (${foundPoles} matching poles)`;
+	progressText.style.marginBottom = "6px";
+	popup.insertBefore(progressText, popup.firstChild);
 	popup.appendChild(bar);
 	document.body.appendChild(popup);
 	await new Promise(r => requestAnimationFrame(r));
@@ -317,9 +416,10 @@ async function manipulateDOM(jsonData, headers) {
 			if (invalidStatuses.includes(pole_status)) {
 				wrong_status_poles.push(`Pole: ${pole_number} - ${ceid} wrong status, push to next status`)
 			} else {
-				for (key in headers) {
+				for (const key in headers) {
 					let whileEscape = 0
 					let escapeBox
+					let index
 					if (!row.cells[headers[key]].childNodes[6].hasChildNodes())
 						continue
 					let current_field = row.cells[headers[key]].childNodes[6].childNodes[1].childNodes[3].childNodes[2]
@@ -374,7 +474,7 @@ async function manipulateDOM(jsonData, headers) {
 									}
 									
 									if (species != "WC" && species != "DF") {
-										spcies = "SP"
+										species = "SP"
 									}
 									document.querySelectorAll('.select2-search__field')[document.querySelectorAll('.select2-search__field').length - 1].value = species
 									document.querySelectorAll('.select2-search__field')[document.querySelectorAll('.select2-search__field').length - 1].dispatchEvent(input_event)
@@ -1034,6 +1134,8 @@ async function manipulateDOM(jsonData, headers) {
 		}
 	}
 	popup.remove();
-	alert("Finished SPIDAstudio Autofill\n" + [...missing_poles, ...wrong_status_poles].join('\n'));
+	return { missingPoles: missing_poles, wrongStatusPoles: wrong_status_poles, foundPoles, currentPhase };
 }
 
+
+})();
