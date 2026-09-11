@@ -1,41 +1,36 @@
 (async function SPIDAstudioAutofillBookmarklet() {
     const MAX_PAGES = 100;
-    const PAGE_CHANGE_TIMEOUT_MS = 20000;
+    const UI_TIMEOUT_MS = 20000;
 
     try {
         const file = await selectJsonFile();
         if (!file) return;
 
         let jsonString = await file.text();
-        jsonString = jsonString.replace(
-            /"Temporary Traffic Control Plan Required":\s*,/g,
-            '"Temporary Traffic Control Plan Required": "",'
-        );
+        jsonString = jsonString.replace(/"Temporary Traffic Control Plan Required":\s*,/g, '"Temporary Traffic Control Plan Required": "",');
         jsonString = jsonString.replace('"\\t', '"');
-
         const jsonData = JSON.parse(jsonString);
         if (!jsonData || typeof jsonData !== "object" || !jsonData.Poles) {
             throw new Error('The selected JSON file does not contain a valid "Poles" object.');
         }
 
-        const summary = {
-            pagesProcessed: 0,
-            foundPoles: 0,
-            missingPoles: [],
-            wrongStatusPoles: []
-        };
+        validatePageContext();
+        await showAllColumns();
+        await goToFirstPage();
+        await enableFormsEditMode();
 
+        const summary = { pagesProcessed: 0, foundPoles: 0, missingPoles: [], wrongStatusPoles: [] };
         for (let pageNumber = 1; pageNumber <= MAX_PAGES; pageNumber++) {
+            await enableFormsEditMode();
             const headers = readHeaders();
-            const pageResult = await processCurrentPage(jsonData, headers, pageNumber);
+            const result = await processCurrentPage(jsonData, headers, pageNumber);
             summary.pagesProcessed++;
-            summary.foundPoles += pageResult.foundPoles;
-            summary.missingPoles.push(...pageResult.missingPoles);
-            summary.wrongStatusPoles.push(...pageResult.wrongStatusPoles);
+            summary.foundPoles += result.foundPoles;
+            summary.missingPoles.push(...result.missingPoles);
+            summary.wrongStatusPoles.push(...result.wrongStatusPoles);
 
             const nextPage = getNextPageControl();
             if (!nextPage) break;
-
             const oldFingerprint = getPageFingerprint();
             nextPage.click();
             await waitForPageChange(oldFingerprint);
@@ -44,15 +39,8 @@
         if (summary.pagesProcessed >= MAX_PAGES && getNextPageControl()) {
             throw new Error(`Stopped after ${MAX_PAGES} pages to prevent an infinite pagination loop.`);
         }
-
         const issues = [...new Set([...summary.missingPoles, ...summary.wrongStatusPoles])];
-        const details = issues.length ? `\n\n${issues.join("\n")}` : "";
-        alert(
-            `Finished SPIDAstudio Autofill\n` +
-            `Pages processed: ${summary.pagesProcessed}\n` +
-            `Matching poles processed: ${summary.foundPoles}` +
-            details
-        );
+        alert(`Finished SPIDAstudio Autofill\nPages processed: ${summary.pagesProcessed}\nMatching poles processed: ${summary.foundPoles}${issues.length ? `\n\n${issues.join("\n")}` : ""}`);
     } catch (error) {
         document.getElementById("spida-autofill-file-dialog")?.remove();
         document.getElementById("spida-autofill-progress")?.remove();
@@ -60,75 +48,208 @@
         alert(`SPIDAstudio Autofill failed:\n\n${error?.message || error}`);
     }
 
+    function validatePageContext() {
+        const url = window.location.href.toLowerCase();
+        if (!["spidastudio", "projectmanager", "/manager"].every((part) => url.includes(part))) throw new Error("Open a SPIDAstudio project before running the tool.");
+        const activeButtons = [...document.querySelectorAll(".ember-view.button.tiny.active")].map((el) => el.textContent.trim());
+        if (!activeButtons.includes("Table")) throw new Error('Select the "Table" view before running the tool.');
+        if (!activeButtons.includes("Station Rows")) throw new Error('Select "Station Rows" before running the tool.');
+    }
+
+    async function showAllColumns() {
+        const oldFingerprint = getTableStructureFingerprint();
+        const selectColumnsButton = [...document.querySelectorAll("button, a")]
+            .find((element) => isVisible(element) && element.textContent.trim() === "Select Columns")
+            || document.getElementById("ember3254");
+
+        if (!selectColumnsButton) {
+            throw new Error('Could not find the "Select Columns" button.');
+        }
+
+        selectColumnsButton.click();
+
+        // Allow Ember to finish opening and rendering the dialog before looking
+        // for either the master checkbox or its action buttons.
+        await nextPaint();
+        await delay(250);
+
+        const controls = await waitFor(
+            findSelectColumnsControls,
+            'the Select Columns dialog, master "Visible" checkbox, and Save button'
+        );
+
+        const { masterCheckbox, saveButton, dialog } = controls;
+
+        if (!masterCheckbox.checked || masterCheckbox.indeterminate) {
+            masterCheckbox.click();
+
+            await waitFor(
+                () => masterCheckbox.checked && !masterCheckbox.indeterminate,
+                'the master "Visible" checkbox to select all columns'
+            );
+
+            // Column rows update asynchronously after the master checkbox changes.
+            await nextPaint();
+            await delay(250);
+        }
+
+        // Re-find Save because Ember can replace dialog nodes while updating rows.
+        const refreshedControls = await waitFor(
+            findSelectColumnsControls,
+            'the Select Columns Save button after all columns were selected'
+        );
+
+        refreshedControls.saveButton.click();
+
+        await waitFor(
+            () => !document.contains(refreshedControls.masterCheckbox)
+                || !isVisible(refreshedControls.dialog),
+            'the Select Columns dialog to close'
+        );
+
+        await waitFor(
+            () => document.querySelector("tr.data-row:not(.bulk-edit-row)"),
+            'station rows to load after saving columns'
+        );
+
+        // A table refresh does not always change immediately when all columns were
+        // already visible, so the fingerprint change is helpful but not required.
+        await waitFor(
+            () => getTableStructureFingerprint() !== oldFingerprint,
+            'the table columns to refresh',
+            5000
+        ).catch(() => {});
+
+        await nextPaint();
+    }
+
+    function findSelectColumnsControls() {
+        const headerCheckboxes = [...document.querySelectorAll('thead input[type="checkbox"], th input[type="checkbox"]')];
+
+        for (const masterCheckbox of headerCheckboxes) {
+            const headerCell = masterCheckbox.closest("th");
+            const headerRow = masterCheckbox.closest("tr");
+            const headerText = `${headerCell?.textContent || ""} ${headerRow?.textContent || ""}`;
+
+            if (!/\bvisible\b/i.test(headerText)) continue;
+
+            let scope = masterCheckbox.parentElement;
+            while (scope && scope !== document.documentElement) {
+                const saveButton = findDialogActionButton(scope, /^(save|save columns|ok|apply)\b/i);
+                const cancelButton = findDialogActionButton(scope, /^(cancel|close)\b/i);
+                const looksLikeDialog = scope.matches?.('[role="dialog"], .reveal-modal, .modal, .ember-modal-dialog')
+                    || Boolean(cancelButton)
+                    || /select columns/i.test(scope.textContent || "");
+
+                if (saveButton && looksLikeDialog && isVisible(masterCheckbox) && isVisible(saveButton)) {
+                    return { masterCheckbox, saveButton, dialog: scope };
+                }
+
+                scope = scope.parentElement;
+            }
+        }
+
+        return null;
+    }
+
+    function findDialogActionButton(scope, textPattern) {
+        return [...scope.querySelectorAll('button, a, input[type="button"], input[type="submit"]')]
+            .find((element) => {
+                const label = (element.textContent || element.value || element.getAttribute("aria-label") || "").trim();
+                return textPattern.test(label) && isVisible(element) && !element.disabled;
+            }) || null;
+    }
+
+    function delay(milliseconds) {
+        return new Promise((resolve) => setTimeout(resolve, milliseconds));
+    }
+
+    function nextPaint() {
+        return new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+    }
+
+    async function enableFormsEditMode() {
+        const pencil = findFormsPencil();
+        if (!pencil) return;
+        (pencil.closest("button, a") || pencil).click();
+        await waitFor(() => !findFormsPencil(), "Forms edit mode to enable");
+        await waitFor(() => document.querySelector("tr.data-row.bulk-edit-row"), "editable form fields to load");
+    }
+
+    function findFormsPencil() {
+        return [...document.querySelectorAll(".fi-pencil.small-icon-button")].find((icon) => {
+            const area = icon.closest("td, th, div, section, li") || icon.parentElement;
+            return area && /Forms\s*:/i.test(area.textContent || "") && isVisible(icon);
+        }) || null;
+    }
+
+    async function goToFirstPage() {
+        const current = document.querySelector("ul.pagination li.current");
+        if (!current || current.textContent.trim() === "1") return;
+        const pageOne = [...document.querySelectorAll("ul.pagination li a")].find((a) => a.textContent.trim() === "1");
+        if (!pageOne) throw new Error("Could not find pagination page 1.");
+        const oldFingerprint = getPageFingerprint();
+        pageOne.click();
+        await waitForPageChange(oldFingerprint);
+    }
+
+    function getNextPageControl() {
+        const current = document.querySelector("ul.pagination li.current");
+        const item = current?.nextElementSibling;
+        if (!item || item.classList.contains("unavailable") || item.classList.contains("disabled")) return null;
+        return item.querySelector("a[data-ember-action], a");
+    }
+
+    function getPageFingerprint() {
+        const page = document.querySelector("ul.pagination li.current")?.textContent.trim() || "";
+        const rows = [...document.querySelectorAll("tr.data-row:not(.bulk-edit-row)")];
+        return `${page}::${rows.length}::${rows.slice(0, 3).map((r) => r.textContent.trim()).join("|")}`;
+    }
+
+    function getTableStructureFingerprint() {
+        const row = document.querySelector("table tr");
+        return row ? `${row.cells.length}::${row.textContent.trim()}` : "";
+    }
+
+    async function waitForPageChange(oldFingerprint) {
+        await waitFor(() => getPageFingerprint() !== oldFingerprint && document.querySelector("tr.data-row:not(.bulk-edit-row)"), "the next page to load");
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+
+    function waitFor(test, description, timeout = UI_TIMEOUT_MS) {
+        return new Promise((resolve, reject) => {
+            const started = Date.now();
+            const check = () => {
+                try { const result = test(); if (result) return resolve(result); } catch (_) {}
+                if (Date.now() - started >= timeout) return reject(new Error(`Timed out waiting for ${description}.`));
+                setTimeout(check, 150);
+            };
+            check();
+        });
+    }
+
+    function isVisible(element) {
+        if (!element) return false;
+        const style = getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+    }
+
     function selectJsonFile() {
         return new Promise((resolve) => {
             document.getElementById("spida-autofill-file-dialog")?.remove();
             const dialog = document.createElement("div");
             dialog.id = "spida-autofill-file-dialog";
-            Object.assign(dialog.style, {
-                position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)",
-                zIndex: "2147483647", display: "flex", alignItems: "center", gap: "10px",
-                padding: "12px 14px", border: "1px solid #a6a6a6", borderRadius: "6px",
-                background: "#fff", color: "#222", boxShadow: "0 4px 18px rgba(0,0,0,.25)",
-                font: "14px Arial,sans-serif", cursor: "default"
-            });
-            const message = document.createElement("span");
-            message.textContent = "Select the SPIDAstudio JSON file:";
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = ".json,application/json";
-            input.style.cursor = "pointer";
-            const cancel = document.createElement("button");
-            cancel.type = "button";
-            cancel.textContent = "Cancel";
-            cancel.style.cursor = "pointer";
+            Object.assign(dialog.style, { position:"fixed", top:"20px", left:"50%", transform:"translateX(-50%)", zIndex:"2147483647", display:"flex", alignItems:"center", gap:"10px", padding:"12px 14px", border:"1px solid #a6a6a6", borderRadius:"6px", background:"#fff", color:"#222", boxShadow:"0 4px 18px rgba(0,0,0,.25)", font:"14px Arial,sans-serif", cursor:"default" });
+            const message = document.createElement("span"); message.textContent = "Select the SPIDAstudio JSON file:";
+            const input = document.createElement("input"); input.type = "file"; input.accept = ".json,application/json"; input.style.cursor = "pointer";
+            const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel"; cancel.style.cursor = "pointer";
             let done = false;
-            const finish = (file) => {
-                if (done) return;
-                done = true;
-                document.removeEventListener("keydown", onKeydown, true);
-                dialog.remove();
-                resolve(file || null);
-            };
+            const finish = (file) => { if (done) return; done = true; document.removeEventListener("keydown", onKeydown, true); dialog.remove(); resolve(file || null); };
             const onKeydown = (event) => { if (event.key === "Escape") finish(null); };
-            input.addEventListener("change", () => finish(input.files?.[0]));
-            cancel.addEventListener("click", () => finish(null));
-            document.addEventListener("keydown", onKeydown, true);
-            dialog.append(message, input, cancel);
-            (document.body || document.documentElement).appendChild(dialog);
-        });
-    }
-
-    function getNextPageControl() {
-        const current = document.querySelector("ul.pagination li.current");
-        if (!current) return null;
-        const nextItem = current.nextElementSibling;
-        if (!nextItem || nextItem.classList.contains("unavailable")) return null;
-        return nextItem.querySelector("a[data-ember-action], a");
-    }
-
-    function getPageFingerprint() {
-        const currentPage = document.querySelector("ul.pagination li.current")?.textContent?.trim() || "";
-        const rows = [...document.querySelectorAll("tr.data-row:not(.bulk-edit-row)")];
-        const rowText = rows.slice(0, 3).map((row) => row.textContent.trim()).join("|");
-        return `${currentPage}::${rows.length}::${rowText}`;
-    }
-
-    function waitForPageChange(oldFingerprint) {
-        return new Promise((resolve, reject) => {
-            const started = Date.now();
-            const check = () => {
-                if (getPageFingerprint() !== oldFingerprint && document.querySelector("tr.data-row:not(.bulk-edit-row)")) {
-                    requestAnimationFrame(() => requestAnimationFrame(resolve));
-                    return;
-                }
-                if (Date.now() - started >= PAGE_CHANGE_TIMEOUT_MS) {
-                    reject(new Error("The next page did not finish loading within 20 seconds."));
-                    return;
-                }
-                setTimeout(check, 150);
-            };
-            setTimeout(check, 150);
+            input.addEventListener("change", () => finish(input.files?.[0])); cancel.addEventListener("click", () => finish(null)); document.addEventListener("keydown", onKeydown, true);
+            dialog.append(message, input, cancel); (document.body || document.documentElement).appendChild(dialog);
         });
     }
 
@@ -162,17 +283,6 @@ function readHeaders(){
 	});
 	if (!stationRowsFound) {
 		alert("Select Station Rows")
-		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
-	}
-	
-	let editFound = false
-	document.querySelectorAll('.fi-pencil.small-icon-button').forEach((element) => {
-		if (element.parentElement.parentElement.outerText.trim() == "Forms:") {
-			editFound = true
-		}
-	});
-	if (editFound) {
-		alert("Enable edit forms mode with the pencil icon")
 		throw new Error("SPIDAstudio Autofill stopped because the page is not ready.");
 	}
 	
@@ -344,6 +454,7 @@ async function processCurrentPage(jsonData, headers, pageNumber) {
 	}
 	
 	if (foundPoles > 0) {
+		
 		if (currentPhase === "One") {
 			if (jsonData["Inspected By"]) {
 				if (!document.querySelector('tr.data-row.bulk-edit-row').cells[headers["Inspected By"]].childNodes[2].childNodes[2].readyOnly) {
@@ -379,9 +490,7 @@ async function processCurrentPage(jsonData, headers, pageNumber) {
 		}
 	}
 
-	document.getElementById("spida-autofill-progress")?.remove();
 	const popup = document.createElement("div");
-	popup.id = "spida-autofill-progress";
 	popup.style.position = "fixed";
 	popup.style.top = "20px";
 	popup.style.left = "50%";
@@ -389,7 +498,8 @@ async function processCurrentPage(jsonData, headers, pageNumber) {
 	popup.style.background = "white";
 	popup.style.padding = "10px";
 	popup.style.border = "1px solid black";
-	popup.style.zIndex = "9999";
+	popup.id = "spida-autofill-progress";
+	popup.style.zIndex = "2147483647";
 
 	const bar = document.createElement("progress");
 	bar.value = 0;
@@ -399,7 +509,7 @@ async function processCurrentPage(jsonData, headers, pageNumber) {
 	const progressText = document.createElement("div");
 	progressText.textContent = `Processing page ${pageNumber} (${foundPoles} matching poles)`;
 	progressText.style.marginBottom = "6px";
-	popup.insertBefore(progressText, popup.firstChild);
+	popup.appendChild(progressText);
 	popup.appendChild(bar);
 	document.body.appendChild(popup);
 	await new Promise(r => requestAnimationFrame(r));
