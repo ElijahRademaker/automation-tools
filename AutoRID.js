@@ -1,7 +1,7 @@
-(async function AutoRID_v1_0_5() {
+(async function AutoRID_v1_0_8() {
     "use strict";
 
-    const WORKFLOW_VERSION = "AutoRID v1.0.5";
+    const WORKFLOW_VERSION = "AutoRID v1.0.8";
     const STORAGE_KEY = "RID_WORKFLOW_PAYLOAD_V1";
 
     function normalize(value) {
@@ -254,7 +254,7 @@
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0.5 / Katapult";
+    const VERSION = "AutoRID v1.0.8 / Katapult";
     const CONFIG = {
         oldAttributeNames: ["Pole Tag", "pole_tag", "pole tag"],
         newAttributeNames: ["Existing CE ID Tag", "existing_ce_id_tag", "existing ce id tag"],
@@ -857,16 +857,16 @@
         delayMsBetweenPoles: 0,
         batchSize: 100,
 
-        filePrefix: "AutoRID v1.0.5 / GIS Export",
+        filePrefix: "AutoRID v1.0.8 / GIS Export",
         arcgisVersion: "4.29",
-        showPreview: true,
+        showPreview: false,
 
         // Filled automatically from the host GIS Web Viewer page if ArcGIS IdentityManager has a credential.
         authToken: null
     };
 
     function log(...args) {
-        console.log("[AutoRID v1.0.5 / GIS Export]", ...args);
+        console.log("[AutoRID v1.0.8 / GIS Export]", ...args);
     }
 
     function sleep(ms) {
@@ -879,7 +879,7 @@
             const timer = setTimeout(() => {
                 if (settled) return;
                 settled = true;
-                console.warn(`[AutoRID v1.0.5 / GIS Export] Timeout waiting for ${label}. Continuing.`);
+                console.warn(`[AutoRID v1.0.8 / GIS Export] Timeout waiting for ${label}. Continuing.`);
                 resolve({ timedOut: true, label });
             }, timeoutMs);
 
@@ -911,15 +911,15 @@
                     try {
                         resolve((esriId && esriId.credentials) ? esriId.credentials.slice() : []);
                     } catch (err) {
-                        console.warn("[AutoRID v1.0.5 / GIS Export] Could not read host IdentityManager credentials.", err);
+                        console.warn("[AutoRID v1.0.8 / GIS Export] Could not read host IdentityManager credentials.", err);
                         resolve([]);
                     }
                 }, function (err) {
-                    console.warn("[AutoRID v1.0.5 / GIS Export] Host IdentityManager require failed.", err);
+                    console.warn("[AutoRID v1.0.8 / GIS Export] Host IdentityManager require failed.", err);
                     resolve([]);
                 });
             } catch (err) {
-                console.warn("[AutoRID v1.0.5 / GIS Export] Credential lookup failed.", err);
+                console.warn("[AutoRID v1.0.8 / GIS Export] Credential lookup failed.", err);
                 resolve([]);
             }
         });
@@ -927,7 +927,7 @@
 
     async function initializeAuthToken() {
         const credentials = await getHostPageArcgisCredentials();
-        console.log("[AutoRID v1.0.5 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
+        console.log("[AutoRID v1.0.8 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
 
         const match = credentials.find(c => {
             const server = String(c.server || "").toLowerCase();
@@ -936,12 +936,12 @@
 
         if (match && match.token) {
             CONFIG.authToken = match.token;
-            console.log("[AutoRID v1.0.5 / GIS Export] Using ArcGIS token from host page IdentityManager.");
+            console.log("[AutoRID v1.0.8 / GIS Export] Using ArcGIS token from host page IdentityManager.");
             return true;
         }
 
         CONFIG.authToken = null;
-        console.warn("[AutoRID v1.0.5 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
+        console.warn("[AutoRID v1.0.8 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
         return false;
     }
 
@@ -1394,7 +1394,7 @@
         box.style.boxShadow = "0 4px 14px rgba(0,0,0,.35)";
 
         const title = document.createElement("div");
-        title.textContent = "AutoRID v1.0.5 / GIS Export";
+        title.textContent = "AutoRID v1.0.8 / GIS Export";
         title.style.fontWeight = "700";
         title.style.marginBottom = "8px";
 
@@ -1497,8 +1497,18 @@
             document.body.appendChild(iframe);
             const frameWindow = iframe.contentWindow;
             const frameDoc = iframe.contentDocument || frameWindow.document;
+            const hostDevicePixelRatio = Number(window.devicePixelRatio || 1);
+            try {
+                Object.defineProperty(frameWindow, "devicePixelRatio", {
+                    configurable: true,
+                    enumerable: true,
+                    get: () => 1
+                });
+            } catch (error) {
+                console.warn("[AutoRID v1.0.8 / GIS Export] Could not normalize iframe devicePixelRatio.", error);
+            }
             frameDoc.open();
-            frameDoc.write("<!doctype html><html><head><meta charset='utf-8'></head><body></body></html>");
+            frameDoc.write("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no'></head><body></body></html>");
             frameDoc.close();
 
             const style = frameDoc.createElement("style");
@@ -1559,7 +1569,7 @@
             try {
                 await withTimeout(layer.when(), timeoutMs, title);
             } catch (err) {
-                console.warn(`[AutoRID v1.0.5 / GIS Export] Layer failed to load: ${title}`, err);
+                console.warn(`[AutoRID v1.0.8 / GIS Export] Layer failed to load: ${title}`, err);
             }
         }
         updateProgress(ui, basePercent + 10, "Layer readiness complete. Continuing export...");
@@ -2110,7 +2120,7 @@
     async function waitForViewIdle(view, timeoutMs = 15000) {
         const result = await waitForAdaptiveRenderReady(view, [], timeoutMs, "Map view");
         if (!result.ready) {
-            console.warn(`[AutoRID v1.0.5 / GIS Export] ${result.reason}`);
+            console.warn(`[AutoRID v1.0.8 / GIS Export] ${result.reason}`);
         }
         return result;
     }
@@ -2150,7 +2160,7 @@
                     readyLayerView = layerView;
                     break;
                 } catch (error) {
-                    console.warn(`[AutoRID v1.0.5 / GIS Export] ${label} readiness attempt ${attempt} failed.`, error);
+                    console.warn(`[AutoRID v1.0.8 / GIS Export] ${label} readiness attempt ${attempt} failed.`, error);
                     if (attempt <= CONFIG.screenshotLayerRetryCount) await sleep(700 * attempt);
                 }
             }
@@ -2169,7 +2179,7 @@
         if (!readiness.ready) {
             throw new Error(`Required GIS layers did not finish rendering within ${Math.round(timeoutPerLayerMs / 1000)} seconds. ${readiness.reason}`);
         }
-        console.log(`[AutoRID v1.0.5 / GIS Export] Map render confirmed ready in ${(readiness.elapsedMs / 1000).toFixed(2)} seconds.`);
+        console.log(`[AutoRID v1.0.8 / GIS Export] Map render confirmed ready in ${(readiness.elapsedMs / 1000).toFixed(2)} seconds.`);
         return readiness;
     }
 
@@ -2326,7 +2336,7 @@
             }
         }
 
-        console.log("[AutoRID v1.0.5 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
+        console.log("[AutoRID v1.0.8 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
             const refRect = labelRectFromPoint(referenceScreen, candidate, referenceLabelWidth, referenceLabelHeight);
             return {
                 name: candidate.name,
@@ -2958,7 +2968,7 @@
 
         for (const placement of layout) drawCallout(ctx, placement);
 
-        console.log("[AutoRID v1.0.5 / GIS Export] Floating callout layout", layout.map(item => ({
+        console.log("[AutoRID v1.0.8 / GIS Export] Floating callout layout", layout.map(item => ({
             lines: item.lines,
             rect: item.rect,
             radius: item.radius,
@@ -3076,9 +3086,9 @@
                     token: CONFIG.authToken,
                     expires: Date.now() + 60 * 60 * 1000
                 });
-                console.log("[AutoRID v1.0.5 / GIS Export] Registered host token with iframe IdentityManager.");
+                console.log("[AutoRID v1.0.8 / GIS Export] Registered host token with iframe IdentityManager.");
             } catch (err) {
-                console.warn("[AutoRID v1.0.5 / GIS Export] Failed to register token with iframe IdentityManager.", err);
+                console.warn("[AutoRID v1.0.8 / GIS Export] Failed to register token with iframe IdentityManager.", err);
             }
         }
 
@@ -3087,13 +3097,13 @@
 
         if (CONFIG.landbaseMapServers && CONFIG.landbaseMapServers.length) {
             landbaseUrls = CONFIG.landbaseMapServers.slice();
-            console.log("[AutoRID v1.0.5 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
+            console.log("[AutoRID v1.0.8 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
         } else {
             try {
                 landbaseUrls = await discoverLandbaseMapServers(CONFIG.landbaseFolder);
-                console.log("[AutoRID v1.0.5 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
+                console.log("[AutoRID v1.0.8 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
             } catch (err) {
-                console.warn("[AutoRID v1.0.5 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
+                console.warn("[AutoRID v1.0.8 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
                 landbaseUrls = [];
             }
         }
@@ -3104,7 +3114,7 @@
             opacity: 1
         }));
 
-        console.log("[AutoRID v1.0.5 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
+        console.log("[AutoRID v1.0.8 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
         const electricLayer = mapImageLayerOptions(MapImageLayer, { url: CONFIG.electricMapServer, title: "Electric", opacity: 1 });
         const markerLayer = new GraphicsLayer({ title: "CEID Update Markers and Labels" });
         const map = new EsriMap({ basemap: "gray-vector", layers: [...landbaseLayers, electricLayer, markerLayer] });
@@ -3112,6 +3122,19 @@
 
         updateProgress(ui, 30, `Initializing hidden map view...\nLandbase services added: ${landbaseLayers.length}`);
         await view.when();
+        const frameDevicePixelRatio = Number(iframe.contentWindow.devicePixelRatio || 1);
+        const exportEnvironment = {
+            hostDevicePixelRatio: Number(window.devicePixelRatio || 1),
+            frameDevicePixelRatio,
+            frameCssSize: `${view.width}x${view.height}`,
+            outputImageSize: `${CONFIG.outputWidth}x${CONFIG.outputHeight}`,
+            screenResolution: `${screen.width}x${screen.height}`,
+            browserViewport: `${window.innerWidth}x${window.innerHeight}`
+        };
+        console.log("[AutoRID v1.0.8 / GIS Export] Normalized ArcGIS render environment", exportEnvironment);
+        if (Math.abs(frameDevicePixelRatio - 1) > 0.01) {
+            throw new Error(`ArcGIS iframe pixel density could not be normalized. Expected 1, received ${frameDevicePixelRatio}.`);
+        }
         updateProgress(ui, 40, "Map initialized. Skipping pre-load layer wait so slow Landbase/Electric services cannot stall the exporter. Layers will load during each screenshot view.");
         await sleep(500);
 
@@ -3138,7 +3161,7 @@
                         results.duplicateCeidsResolved.push(
                             `SCID ${record.scid}: old CEID ${record.oldCeid} selected from ${selection.candidateCount} matches at ${selection.distanceFeet.toFixed(1)} ft`
                         );
-                        console.log(`[AutoRID v1.0.5 / GIS Export] Duplicate CEID resolved by Katapult coordinates.`, {
+                        console.log(`[AutoRID v1.0.8 / GIS Export] Duplicate CEID resolved by Katapult coordinates.`, {
                             scid: record.scid,
                             oldCeid: record.oldCeid,
                             candidateCount: selection.candidateCount,
@@ -3164,7 +3187,7 @@
                 if (!pointData || !isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
                 resolved.push({ record, feature, pointData });
             } catch (err) {
-                console.error("[AutoRID v1.0.5 / GIS Export] Resolve failed", record, err);
+                console.error("[AutoRID v1.0.8 / GIS Export] Resolve failed", record, err);
                 results.failed.push(`${record.sourceLine} | ${err.message || err}`);
             }
         }
@@ -3328,7 +3351,7 @@
                 }
                 results.exported.push(fileName);
             } catch (err) {
-                console.error("[AutoRID v1.0.5 / GIS Export] Group failed", groupIndex + 1, err);
+                console.error("[AutoRID v1.0.8 / GIS Export] Group failed", groupIndex + 1, err);
                 results.failed.push(`Group ${groupIndex + 1}: ${group.map(x => x.record.newCeid).join(", ")} | ${err.message || err}`);
             }
         }
@@ -3367,6 +3390,9 @@
             `Target poles resolved: ${resolved.length}\n` +
             `Groups created: ${results.groupsCreated}\n` +
             `Pole circles exported: ${resolved.length} of ${records.length}\n` +
+            `Host device pixel ratio: ${exportEnvironment.hostDevicePixelRatio}\n` +
+            `ArcGIS frame pixel ratio: ${exportEnvironment.frameDevicePixelRatio}\n` +
+            `ArcGIS frame size: ${exportEnvironment.frameCssSize}\n` +
             `Duplicate CEIDs resolved by coordinates: ${results.duplicateCeidsResolved.length}\n` +
             `Old CEID not found: ${results.notFound.length}\n` +
             `N/A coordinate target pole not found: ${results.coordinateNoTargetPole.length}\n` +
@@ -3403,8 +3429,8 @@ Next: Open the RID form and run the bookmarklet again.`,
             tone: results.failed.length ? "warning" : "success"
         });
     } catch (err) {
-        console.error("[AutoRID v1.0.5 / GIS Export] Fatal error:", err);
-        alert("AutoRID v1.0.5 / GIS Export failed. Check console for details:\n\n" + err.message);
+        console.error("[AutoRID v1.0.8 / GIS Export] Fatal error:", err);
+        alert("AutoRID v1.0.8 / GIS Export failed. Check console for details:\n\n" + err.message);
     }
 
     }
@@ -3413,7 +3439,7 @@ Next: Open the RID form and run the bookmarklet again.`,
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0.5 / RID Form";
+    const VERSION = "AutoRID v1.0.8 / RID Form";
     const CONFIG = {
         correctionType: "Electric CAD URD",
         errorCategory: "Pole Errors",
@@ -3997,15 +4023,15 @@ Next: Open the RID form and run the bookmarklet again.`,
     }
 
     function showRidCopyAssistant(fields, notificationNumber, rowCount) {
-        document.getElementById("autorid-copy-assistant-v1-0-5")?.remove();
+        document.getElementById("autorid-copy-assistant-v1-0-8")?.remove();
         document.getElementById("rid-workflow-card")?.remove();
         const panel = document.createElement("section");
-        panel.id = "autorid-copy-assistant-v1-0-5";
+        panel.id = "autorid-copy-assistant-v1-0-8";
         panel.style.cssText = "position:fixed;top:72px;right:18px;z-index:2147483647;width:390px;height:620px;min-width:300px;min-height:180px;max-width:calc(100vw - 20px);max-height:calc(100vh - 20px);overflow:auto;resize:both;background:#fff;color:#242424;border:1px solid #c8c8c8;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.28);font-family:Segoe UI,Arial,sans-serif;font-size:14px;";
         const header = document.createElement("div");
         header.style.cssText = "position:sticky;top:0;background:#742774;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:1;border-radius:11px 11px 0 0;cursor:move;user-select:none;";
         const heading = document.createElement("div");
-        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0.5</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
+        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0.8</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
         const controls = document.createElement("div");
         const minimize = document.createElement("button");
         const close = document.createElement("button");
@@ -4041,7 +4067,7 @@ Next: Open the RID form and run the bookmarklet again.`,
         const parsed = parseRidRows(combined.ridText);
         if (!parsed.rows.length || parsed.invalid.length) throw new Error("The selected package contains invalid RID rows.");
         const missing = parsed.rows.filter(row => row.mode === "newTag" && !row.adjacentCeid);
-        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.5.");
+        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.8.");
         const description = buildDescription(parsed.rows);
         const gis = window.__RID_WORKFLOW_PACKAGE?.gis || {};
         const substationValue = [gis.substationName, gis.substationId].map(v=>String(v||"").trim()).filter(Boolean).join(" ");
@@ -4078,7 +4104,7 @@ Next: Open the RID form and run the bookmarklet again.`,
         }
 
         if (mode === "rid-form") {
-            await prepareSharedPayload("AutoRID v1.0.5");
+            await prepareSharedPayload("AutoRID v1.0.8");
             await runRidFormStage();
             return;
         }
