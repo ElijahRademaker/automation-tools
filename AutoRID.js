@@ -1,13 +1,59 @@
-(async function AutoRID_v1_0() {
+(async function AutoRID_v1_0_1() {
     "use strict";
 
-    const WORKFLOW_VERSION = "AutoRID v1.0";
+    const WORKFLOW_VERSION = "AutoRID v1.0.1";
     const STORAGE_KEY = "RID_WORKFLOW_PAYLOAD_V1";
 
     function normalize(value) {
         return String(value || "").trim();
     }
 
+    function showWorkflowCard({ title, message, tone = "info", actions = [] }) {
+        const existing = document.getElementById("rid-workflow-card");
+        if (existing) existing.remove();
+        const colors = {
+            info: { accent: "#0078d4", background: "#f5f9ff" },
+            success: { accent: "#107c10", background: "#f3faf3" },
+            warning: { accent: "#ca5010", background: "#fff8f2" },
+            error: { accent: "#a4262c", background: "#fff4f4" }
+        };
+        const palette = colors[tone] || colors.info;
+        const overlay = document.createElement("div");
+        overlay.id = "rid-workflow-card";
+        overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;font-family:Segoe UI,Arial,sans-serif";
+        const card = document.createElement("div");
+        card.style.cssText = `width:520px;max-width:100%;max-height:calc(100vh - 32px);overflow:auto;background:white;border-radius:12px;border-top:6px solid ${palette.accent};box-shadow:0 16px 48px rgba(0,0,0,.3);padding:22px`;
+        const heading = document.createElement("h2");
+        heading.textContent = title;
+        heading.style.cssText = "margin:0 0 12px;font-size:22px;color:#242424";
+        const body = document.createElement("div");
+        body.textContent = message;
+        body.style.cssText = `white-space:pre-line;line-height:1.5;padding:12px;border-radius:8px;background:${palette.background};color:#242424`;
+        const buttons = document.createElement("div");
+        buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:16px";
+        for (const action of actions) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = action.label;
+            button.style.cssText = action.primary
+                ? `padding:8px 14px;border:1px solid ${palette.accent};border-radius:5px;background:${palette.accent};color:white;font-weight:600;cursor:pointer`
+                : "padding:8px 14px;border:1px solid #8a8886;border-radius:5px;background:white;color:#242424;cursor:pointer";
+            button.addEventListener("click", () => action.onClick?.({ overlay, card, body }));
+            buttons.appendChild(button);
+        }
+        if (!actions.length) {
+            const close = document.createElement("button");
+            close.type = "button";
+            close.textContent = "Close";
+            close.style.cssText = `padding:8px 14px;border:1px solid ${palette.accent};border-radius:5px;background:${palette.accent};color:white;font-weight:600;cursor:pointer`;
+            close.onclick = () => overlay.remove();
+            buttons.appendChild(close);
+        }
+        card.append(heading, body, buttons);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+        return { overlay, card, body, buttons };
+    }
     function isCombinedPayload(value) {
         const text = normalize(value);
         return /^Notification\s*(?:Number|#)?\s*:/im.test(text) && /(?:^|\n)(?:N\/A|[^,\n]+),[^,\n]+,/i.test(text);
@@ -208,7 +254,7 @@
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0 / Katapult";
+    const VERSION = "AutoRID v1.0.1 / Katapult";
     const CONFIG = {
         oldAttributeNames: ["Pole Tag", "pole_tag", "pole tag"],
         newAttributeNames: ["Existing CE ID Tag", "existing_ce_id_tag", "existing ce id tag"],
@@ -668,80 +714,60 @@
     }
 
     function showResults(result, sourcePath, notificationNumber) {
-        const old = document.getElementById("rid-katapult-scraper-panel");
-        if (old) old.remove();
+        const packageFactory = () => createWorkflowPackage(result, notificationNumber, sourcePath);
+        const summary = [
+            `Notification: ${notificationNumber}`,
+            `Poles requiring RID updates: ${result.ready.length}`,
+            `Items requiring review: ${result.review.length}`,
+            "",
+            "The workflow package has been downloaded."
+        ].join("\n");
 
-        const overlay = document.createElement("div");
-        overlay.id = "rid-katapult-scraper-panel";
-        overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif";
-
-        const panel = document.createElement("div");
-        panel.style.cssText = "width:900px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;background:white;border-radius:10px;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.4)";
-
-        const title = document.createElement("h2");
-        title.textContent = VERSION;
-        title.style.margin = "0 0 8px";
-
-        const summary = document.createElement("div");
-        summary.style.cssText = "margin-bottom:12px;line-height:1.45";
-        summary.textContent = `Source: ${sourcePath}\nNotification Number: ${notificationNumber}\nPole nodes found: ${result.allPoles.length}\nReady for RIDExporter: ${result.ready.length}\nSkipped because tags match: ${result.matching.length}\nIgnored Other poles: ${result.ignoredOther.length}\nIgnored non-Consumers Energy poles: ${result.ignoredNonConsumersEnergy.length}\nNeeds review: ${result.review.length}`;
-        summary.style.whiteSpace = "pre-line";
-
-        const textarea = document.createElement("textarea");
-        textarea.value = buildCombinedPayload(result, notificationNumber);
-        textarea.style.cssText = "width:100%;box-sizing:border-box;height:320px;padding:10px;font:13px Consolas,monospace;resize:vertical";
-        textarea.spellcheck = false;
-
-        const review = document.createElement("pre");
-        review.style.cssText = "background:#f5f5f5;padding:10px;border-radius:6px;white-space:pre-wrap;max-height:180px;overflow:auto";
-        review.textContent = result.review.length
-            ? result.review.map(item => `${item.nodeId}: ${item.reason} | SCID=${item.scid || "(blank)"} | Owner=${item.poleOwner || "(blank)"} | Pole Tag=${item.oldCeidRaw || item.oldCeid || "(blank)"} | Existing CE ID Tag=${item.newCeid || "(blank)"}`).join("\n")
-            : "No review issues.";
-
-        const buttons = document.createElement("div");
-        buttons.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap";
-
-        function button(text, handler, primary = false) {
-            const b = document.createElement("button");
-            b.textContent = text;
-            b.style.cssText = `padding:8px 14px;border-radius:4px;border:1px solid #999;cursor:pointer;${primary ? "background:#0078d4;color:white;border-color:#0078d4" : "background:white"}`;
-            b.onclick = handler;
-            return b;
-        }
-
-        buttons.appendChild(button("Copy Combined RID Payload", async () => {
-            await navigator.clipboard.writeText(textarea.value);
-            alert(`Copied notification ${notificationNumber} and ${result.ready.length} RIDExporter rows.`);
-        }, true));
-
-        buttons.appendChild(button("Download TXT", () => {
-            downloadText(textarea.value + (textarea.value ? "\n" : ""), `${VERSION}_Combined_RID_Payload.txt`);
-        }));
-
-        buttons.appendChild(button("Download RID Workflow JSON", () => {
-            downloadWorkflowPackage(createWorkflowPackage(result, notificationNumber, sourcePath));
-        }, true));
-        buttons.appendChild(button("Download CSV Audit", () => {
-            const rows = [["Node ID", "SCID", "Status", "Old CEID (Pole Tag)", "New CEID (Existing CE ID Tag)", "Latitude", "Longitude", "RIDExporter Line", "Reason"]];
-            for (const item of result.ready) rows.push([item.nodeId, item.scid, "Ready", item.oldCeid || "N/A", item.newCeid, item.latitude, item.longitude, item.outputLine, ""]);
-            for (const item of result.matching) rows.push([item.nodeId, item.scid, "Matched/Skipped", item.oldCeid, item.newCeid, item.latitude, item.longitude, "", "Old and new CEIDs match"]);
-            for (const item of result.ignoredOther) rows.push([item.nodeId, item.scid, "Ignored", item.oldCeid, item.newCeid, item.latitude, item.longitude, "", "Other pole with no RID tag data"]);
-            for (const item of result.ignoredNonConsumersEnergy) rows.push([item.nodeId, item.scid, "Ignored", item.oldCeidRaw || item.oldCeid, item.newCeid, item.latitude, item.longitude, "", `Pole owner is ${item.poleOwner || "unknown"}, not Consumers Energy`]);
-            for (const item of result.review) rows.push([item.nodeId, item.scid, "Review", item.oldCeid, item.newCeid, item.latitude, item.longitude, "", item.reason]);
-            downloadText(rows.map(row => row.map(csvEscape).join(",")).join("\n"), `${VERSION}_Audit.csv`, "text/csv");
-        }));
-
-        buttons.appendChild(button("Close", () => overlay.remove()));
-
-        panel.appendChild(title);
-        panel.appendChild(summary);
-        panel.appendChild(document.createTextNode("Combined RID payload (notification + RIDExporter rows):"));
-        panel.appendChild(textarea);
-        panel.appendChild(document.createTextNode("Needs review:"));
-        panel.appendChild(review);
-        panel.appendChild(buttons);
-        overlay.appendChild(panel);
-        document.body.appendChild(overlay);
+        const card = showWorkflowCard({
+            title: "AutoRID Workflow Ready",
+            message: summary,
+            tone: result.review.length ? "warning" : "success",
+            actions: [
+                {
+                    label: "Download Again",
+                    primary: true,
+                    onClick: () => downloadWorkflowPackage(packageFactory())
+                },
+                {
+                    label: "View Details",
+                    onClick: ({ card }) => {
+                        if (card.querySelector("#rid-katapult-details")) return;
+                        const details = document.createElement("div");
+                        details.id = "rid-katapult-details";
+                        details.style.cssText = "margin-top:16px;border-top:1px solid #ddd;padding-top:16px";
+                        const intro = document.createElement("div");
+                        intro.textContent = "Edit the payload below if a manual correction is needed, then export a replacement JSON package.";
+                        intro.style.cssText = "margin-bottom:8px;color:#444";
+                        const textarea = document.createElement("textarea");
+                        textarea.value = buildCombinedPayload(result, notificationNumber);
+                        textarea.style.cssText = "width:100%;box-sizing:border-box;height:240px;padding:10px;font:13px Consolas,monospace;resize:vertical";
+                        textarea.spellcheck = false;
+                        const review = document.createElement("pre");
+                        review.style.cssText = "white-space:pre-wrap;max-height:170px;overflow:auto;background:#f5f5f5;padding:10px;border-radius:6px";
+                        review.textContent = result.review.length
+                            ? result.review.map(item => `SCID ${item.scid || "(blank)"}: ${item.reason}`).join("\n")
+                            : "No review items.";
+                        const exportButton = document.createElement("button");
+                        exportButton.type = "button";
+                        exportButton.textContent = "Export Edited JSON";
+                        exportButton.style.cssText = "margin-top:10px;padding:8px 14px;border:0;border-radius:5px;background:#0078d4;color:white;font-weight:600;cursor:pointer";
+                        exportButton.onclick = () => {
+                            const parsed = parseEditedKatapultPayload(textarea.value, notificationNumber, sourcePath);
+                            downloadWorkflowPackage(parsed);
+                        };
+                        details.append(intro, textarea, review, exportButton);
+                        card.insertBefore(details, card.lastElementChild);
+                    }
+                },
+                { label: "Close", onClick: ({ overlay }) => overlay.remove() }
+            ]
+        });
+        return card;
     }
 
     try {
@@ -771,13 +797,6 @@
 
         console.log(`[${VERSION}] Analysis complete`, { notificationNumber, workflowPackage, ...result });
         showResults(result, candidate.path, notificationNumber);
-        alert(
-            `RID workflow package created.\n\n` +
-            `Notification: ${notificationNumber}\n` +
-            `RID poles: ${result.ready.length}\n\n` +
-            `File: RID_Workflow_${notificationNumber}.json\n\n` +
-            `Use this JSON file on GIS and the RID form.`
-        );
     } catch (err) {
         console.error(`[${VERSION}] Failed`, err);
         alert(`${VERSION} failed:\n\n${err.message}\n\nCheck the console for details.`);
@@ -832,7 +851,7 @@
         delayMsBetweenPoles: 0,
         batchSize: 100,
 
-        filePrefix: "AutoRID v1.0 / GIS Export",
+        filePrefix: "AutoRID v1.0.1 / GIS Export",
         arcgisVersion: "4.29",
         showPreview: false,
 
@@ -841,7 +860,7 @@
     };
 
     function log(...args) {
-        console.log("[AutoRID v1.0 / GIS Export]", ...args);
+        console.log("[AutoRID v1.0.1 / GIS Export]", ...args);
     }
 
     function sleep(ms) {
@@ -853,7 +872,7 @@
             promise,
             new Promise(resolve => {
                 setTimeout(() => {
-                    console.warn(`[AutoRID v1.0 / GIS Export] Timeout waiting for ${label}. Continuing.`);
+                    console.warn(`[AutoRID v1.0.1 / GIS Export] Timeout waiting for ${label}. Continuing.`);
                     resolve({ timedOut: true, label });
                 }, timeoutMs);
             })
@@ -873,15 +892,15 @@
                     try {
                         resolve((esriId && esriId.credentials) ? esriId.credentials.slice() : []);
                     } catch (err) {
-                        console.warn("[AutoRID v1.0 / GIS Export] Could not read host IdentityManager credentials.", err);
+                        console.warn("[AutoRID v1.0.1 / GIS Export] Could not read host IdentityManager credentials.", err);
                         resolve([]);
                     }
                 }, function (err) {
-                    console.warn("[AutoRID v1.0 / GIS Export] Host IdentityManager require failed.", err);
+                    console.warn("[AutoRID v1.0.1 / GIS Export] Host IdentityManager require failed.", err);
                     resolve([]);
                 });
             } catch (err) {
-                console.warn("[AutoRID v1.0 / GIS Export] Credential lookup failed.", err);
+                console.warn("[AutoRID v1.0.1 / GIS Export] Credential lookup failed.", err);
                 resolve([]);
             }
         });
@@ -889,7 +908,7 @@
 
     async function initializeAuthToken() {
         const credentials = await getHostPageArcgisCredentials();
-        console.log("[AutoRID v1.0 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
+        console.log("[AutoRID v1.0.1 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
 
         const match = credentials.find(c => {
             const server = String(c.server || "").toLowerCase();
@@ -898,12 +917,12 @@
 
         if (match && match.token) {
             CONFIG.authToken = match.token;
-            console.log("[AutoRID v1.0 / GIS Export] Using ArcGIS token from host page IdentityManager.");
+            console.log("[AutoRID v1.0.1 / GIS Export] Using ArcGIS token from host page IdentityManager.");
             return true;
         }
 
         CONFIG.authToken = null;
-        console.warn("[AutoRID v1.0 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
+        console.warn("[AutoRID v1.0.1 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
         return false;
     }
 
@@ -1356,7 +1375,7 @@
         box.style.boxShadow = "0 4px 14px rgba(0,0,0,.35)";
 
         const title = document.createElement("div");
-        title.textContent = "AutoRID v1.0 / GIS Export";
+        title.textContent = "AutoRID v1.0.1 / GIS Export";
         title.style.fontWeight = "700";
         title.style.marginBottom = "8px";
 
@@ -1398,10 +1417,19 @@
 
     function updateProgress(ui, percentValue, text) {
         const pct = Math.max(0, Math.min(100, Number(percentValue) || 0));
-        ui.detail.textContent = text;
-        ui.bar.style.width = pct.toFixed(1) + "%";
-        ui.percent.textContent = pct.toFixed(1) + "%";
         log(text);
+        let friendly = "Preparing RID maps...";
+        if (/Waiting for input|Preparing export/i.test(text)) friendly = "Loading workflow file...";
+        else if (/Resolving target|Batch querying/i.test(text)) friendly = "Locating poles...";
+        else if (/adjacent CEID|Headquarters|Substation|Circuit/i.test(text)) friendly = "Collecting GIS information...";
+        else if (/Exporting group/i.test(text)) {
+            const match = text.match(/Exporting group\s+(\d+)\s+of\s+(\d+)/i);
+            friendly = match ? `Creating map ${match[1]} of ${match[2]}...` : "Creating maps...";
+        } else if (/Cleaning up/i.test(text)) friendly = "Preparing files...";
+        else if (/^Done\./i.test(text)) friendly = "GIS export complete.";
+        ui.detail.textContent = friendly;
+        ui.bar.style.width = Math.round(pct) + "%";
+        ui.percent.textContent = Math.round(pct) + "%";
     }
 
     async function promptForMappings() {
@@ -1512,7 +1540,7 @@
             try {
                 await withTimeout(layer.when(), timeoutMs, title);
             } catch (err) {
-                console.warn(`[AutoRID v1.0 / GIS Export] Layer failed to load: ${title}`, err);
+                console.warn(`[AutoRID v1.0.1 / GIS Export] Layer failed to load: ${title}`, err);
             }
         }
         updateProgress(ui, basePercent + 10, "Layer readiness complete. Continuing export...");
@@ -1995,7 +2023,7 @@
         while (view.updating) {
             await sleep(150);
             if (Date.now() - started > timeoutMs) {
-                console.warn("[AutoRID v1.0 / GIS Export] Timed out waiting for view.updating=false.");
+                console.warn("[AutoRID v1.0.1 / GIS Export] Timed out waiting for view.updating=false.");
                 break;
             }
         }
@@ -2008,7 +2036,7 @@
         while (layerView && layerView.updating) {
             await sleep(150);
             if (Date.now() - started > timeoutMs) {
-                console.warn(`[AutoRID v1.0 / GIS Export] Timed out waiting for layerView updating=false: ${label}`);
+                console.warn(`[AutoRID v1.0.1 / GIS Export] Timed out waiting for layerView updating=false: ${label}`);
                 break;
             }
         }
@@ -2025,7 +2053,7 @@
                     await waitForLayerViewIdle(layerView, timeoutPerLayerMs, label);
                 }
             } catch (err) {
-                console.warn(`[AutoRID v1.0 / GIS Export] Could not wait for operational layer: ${label}`, err);
+                console.warn(`[AutoRID v1.0.1 / GIS Export] Could not wait for operational layer: ${label}`, err);
             }
         }
 
@@ -2185,7 +2213,7 @@
             }
         }
 
-        console.log("[AutoRID v1.0 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
+        console.log("[AutoRID v1.0.1 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
             const refRect = labelRectFromPoint(referenceScreen, candidate, referenceLabelWidth, referenceLabelHeight);
             return {
                 name: candidate.name,
@@ -2817,7 +2845,7 @@
 
         for (const placement of layout) drawCallout(ctx, placement);
 
-        console.log("[AutoRID v1.0 / GIS Export] Floating callout layout", layout.map(item => ({
+        console.log("[AutoRID v1.0.1 / GIS Export] Floating callout layout", layout.map(item => ({
             lines: item.lines,
             rect: item.rect,
             radius: item.radius,
@@ -2935,9 +2963,9 @@
                     token: CONFIG.authToken,
                     expires: Date.now() + 60 * 60 * 1000
                 });
-                console.log("[AutoRID v1.0 / GIS Export] Registered host token with iframe IdentityManager.");
+                console.log("[AutoRID v1.0.1 / GIS Export] Registered host token with iframe IdentityManager.");
             } catch (err) {
-                console.warn("[AutoRID v1.0 / GIS Export] Failed to register token with iframe IdentityManager.", err);
+                console.warn("[AutoRID v1.0.1 / GIS Export] Failed to register token with iframe IdentityManager.", err);
             }
         }
 
@@ -2946,13 +2974,13 @@
 
         if (CONFIG.landbaseMapServers && CONFIG.landbaseMapServers.length) {
             landbaseUrls = CONFIG.landbaseMapServers.slice();
-            console.log("[AutoRID v1.0 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
+            console.log("[AutoRID v1.0.1 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
         } else {
             try {
                 landbaseUrls = await discoverLandbaseMapServers(CONFIG.landbaseFolder);
-                console.log("[AutoRID v1.0 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
+                console.log("[AutoRID v1.0.1 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
             } catch (err) {
-                console.warn("[AutoRID v1.0 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
+                console.warn("[AutoRID v1.0.1 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
                 landbaseUrls = [];
             }
         }
@@ -2963,7 +2991,7 @@
             opacity: 1
         }));
 
-        console.log("[AutoRID v1.0 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
+        console.log("[AutoRID v1.0.1 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
         const electricLayer = mapImageLayerOptions(MapImageLayer, { url: CONFIG.electricMapServer, title: "Electric", opacity: 1 });
         const markerLayer = new GraphicsLayer({ title: "CEID Update Markers and Labels" });
         const map = new EsriMap({ basemap: "gray-vector", layers: [...landbaseLayers, electricLayer, markerLayer] });
@@ -3002,7 +3030,7 @@
                 if (!pointData || !isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
                 resolved.push({ record, feature, pointData });
             } catch (err) {
-                console.error("[AutoRID v1.0 / GIS Export] Resolve failed", record, err);
+                console.error("[AutoRID v1.0.1 / GIS Export] Resolve failed", record, err);
                 results.failed.push(`${record.sourceLine} | ${err.message || err}`);
             }
         }
@@ -3149,7 +3177,7 @@
                 }
                 results.exported.push(fileName);
             } catch (err) {
-                console.error("[AutoRID v1.0 / GIS Export] Group failed", groupIndex + 1, err);
+                console.error("[AutoRID v1.0.1 / GIS Export] Group failed", groupIndex + 1, err);
                 results.failed.push(`Group ${groupIndex + 1}: ${group.map(x => x.record.newCeid).join(", ")} | ${err.message || err}`);
             }
         }
@@ -3203,12 +3231,26 @@
         if (results.failed.length) message += `\n\nFailed rows:\n${results.failed.join("\n")}`;
 
         updateProgress(ui, 100, message);
-        alert(message);
-        await sleep(6000);
         ui.box.remove();
+        const outputSummary = results.imagesDocument
+            ? `${results.exported.length} map images were combined into:
+${results.imagesDocument}`
+            : `${results.exported.length} map image${results.exported.length === 1 ? "" : "s"} created.`;
+        showWorkflowCard({
+            title: "GIS Export Complete",
+            message: outputSummary +
+                `
+
+GIS-updated workflow file created:
+${results.updatedPackage || "File creation failed"}` +
+                `
+
+Next: Open the RID form and run the bookmarklet again.`,
+            tone: results.failed.length ? "warning" : "success"
+        });
     } catch (err) {
-        console.error("[AutoRID v1.0 / GIS Export] Fatal error:", err);
-        alert("AutoRID v1.0 / GIS Export failed. Check console for details:\n\n" + err.message);
+        console.error("[AutoRID v1.0.1 / GIS Export] Fatal error:", err);
+        alert("AutoRID v1.0.1 / GIS Export failed. Check console for details:\n\n" + err.message);
     }
 
     }
@@ -3217,7 +3259,7 @@
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0 / RID Form";
+    const VERSION = "AutoRID v1.0.1 / RID Form";
     const CONFIG = {
         correctionType: "Electric CAD URD",
         errorCategory: "Pole Errors",
@@ -3801,15 +3843,15 @@
     }
 
     function showRidCopyAssistant(fields, notificationNumber, rowCount) {
-        document.getElementById("autorid-copy-assistant-v1-0")?.remove();
+        document.getElementById("autorid-copy-assistant-v1-0-1")?.remove();
         document.getElementById("rid-workflow-card")?.remove();
         const panel = document.createElement("section");
-        panel.id = "autorid-copy-assistant-v1-0";
+        panel.id = "autorid-copy-assistant-v1-0-1";
         panel.style.cssText = "position:fixed;top:72px;right:18px;z-index:2147483647;width:390px;height:620px;min-width:300px;min-height:180px;max-width:calc(100vw - 20px);max-height:calc(100vh - 20px);overflow:auto;resize:both;background:#fff;color:#242424;border:1px solid #c8c8c8;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.28);font-family:Segoe UI,Arial,sans-serif;font-size:14px;";
         const header = document.createElement("div");
         header.style.cssText = "position:sticky;top:0;background:#742774;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:1;border-radius:11px 11px 0 0;cursor:move;user-select:none;";
         const heading = document.createElement("div");
-        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
+        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0.1</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
         const controls = document.createElement("div");
         const minimize = document.createElement("button");
         const close = document.createElement("button");
@@ -3845,7 +3887,7 @@
         const parsed = parseRidRows(combined.ridText);
         if (!parsed.rows.length || parsed.invalid.length) throw new Error("The selected package contains invalid RID rows.");
         const missing = parsed.rows.filter(row => row.mode === "newTag" && !row.adjacentCeid);
-        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.");
+        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.1.");
         const description = buildDescription(parsed.rows);
         const gis = window.__RID_WORKFLOW_PACKAGE?.gis || {};
         const substationValue = [gis.substationName, gis.substationId].map(v=>String(v||"").trim()).filter(Boolean).join(" ");
@@ -3882,7 +3924,7 @@
         }
 
         if (mode === "rid-form") {
-            await prepareSharedPayload("AutoRID v1.0");
+            await prepareSharedPayload("AutoRID v1.0.1");
             await runRidFormStage();
             return;
         }
