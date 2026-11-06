@@ -1,7 +1,7 @@
-(async function AutoRID_v1_0_8() {
+(async function AutoRID_v1_0_11() {
     "use strict";
 
-    const WORKFLOW_VERSION = "AutoRID v1.0.8";
+    const WORKFLOW_VERSION = "AutoRID v1.0.11";
     const STORAGE_KEY = "RID_WORKFLOW_PAYLOAD_V1";
 
     function normalize(value) {
@@ -254,7 +254,7 @@
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0.8 / Katapult";
+    const VERSION = "AutoRID v1.0.11 / Katapult";
     const CONFIG = {
         oldAttributeNames: ["Pole Tag", "pole_tag", "pole tag"],
         newAttributeNames: ["Existing CE ID Tag", "existing_ce_id_tag", "existing ce id tag"],
@@ -535,16 +535,22 @@
         return findAttribute(node.attributes, CONFIG.nodeTypeNames).toLowerCase();
     }
 
-    function isOtherPole(node) {
+    function isIgnoredPoleType(node) {
         const nodeType = normalizeText(getNodeType(node)).toLowerCase();
 
-        // Depending on the Katapult model, Other poles may be stored as "other",
-        // "other pole", or another value containing both words.
-        return (
+        // Ignore Katapult placeholder/non-production pole types. Depending on the
+        // model, these can be stored as the short name or a value containing "pole".
+        const isOtherPole = (
             nodeType === "other" ||
             nodeType === "other pole" ||
             (nodeType.includes("other") && nodeType.includes("pole"))
         );
+        const isNewPole = (
+            nodeType === "new" ||
+            nodeType === "new pole" ||
+            (nodeType.includes("new") && nodeType.includes("pole"))
+        );
+        return isOtherPole || isNewPole;
     }
 
     function isPoleNode(node) {
@@ -575,6 +581,7 @@
         const matching = [];
         const review = [];
         const ignoredOther = [];
+        const ignoredPoleTypes = [];
         const ignoredNonConsumersEnergy = [];
         const allPoles = [];
         const seenNew = new Map();
@@ -597,8 +604,11 @@
             const record = { nodeId, scid, scidRaw: normalizeText(scidRaw), oldCeid, oldCeidRaw, newCeid, poleOwner, latitude, longitude, node };
             allPoles.push(record);
 
-            // Katapult's generic "Other Pole" node type can still represent a valid
-            // Consumers Energy pole. Pole ownership, not node type, controls eligibility.
+            if (isIgnoredPoleType(node)) {
+                ignoredPoleTypes.push(record);
+                ignoredOther.push(record);
+                continue;
+            }
 
             if (!isRequiredPoleOwner(poleOwner)) {
                 ignoredNonConsumersEnergy.push(record);
@@ -646,7 +656,7 @@
             }
         }
 
-        return { ready, matching, review, ignoredOther, ignoredNonConsumersEnergy, allPoles };
+        return { ready, matching, review, ignoredOther, ignoredPoleTypes, ignoredNonConsumersEnergy, allPoles };
     }
 
     function downloadText(text, fileName, type = "text/plain") {
@@ -825,8 +835,8 @@
         referencePoleBufferFeet: 40,
         extentExpandFactor: 1.18,
 
-        coordinateSearchRadiusFeet: 75,
-        coordinateSearchRetryRadiiFeet: [75, 150, 300, 600],
+        coordinateSearchRadiusFeet: 35,
+        oldCeidFallbackSearchRadiiFeet: [75, 150, 300, 600],
         duplicateCeidMaximumDistanceFeet: 2640,
         referencePoleSearchRadiusFeet: 600,
 
@@ -857,7 +867,7 @@
         delayMsBetweenPoles: 0,
         batchSize: 100,
 
-        filePrefix: "AutoRID v1.0.8 / GIS Export",
+        filePrefix: "AutoRID v1.0.11 / GIS Export",
         arcgisVersion: "4.29",
         showPreview: false,
 
@@ -866,7 +876,7 @@
     };
 
     function log(...args) {
-        console.log("[AutoRID v1.0.8 / GIS Export]", ...args);
+        console.log("[AutoRID v1.0.11 / GIS Export]", ...args);
     }
 
     function sleep(ms) {
@@ -879,7 +889,7 @@
             const timer = setTimeout(() => {
                 if (settled) return;
                 settled = true;
-                console.warn(`[AutoRID v1.0.8 / GIS Export] Timeout waiting for ${label}. Continuing.`);
+                console.warn(`[AutoRID v1.0.11 / GIS Export] Timeout waiting for ${label}. Continuing.`);
                 resolve({ timedOut: true, label });
             }, timeoutMs);
 
@@ -911,15 +921,15 @@
                     try {
                         resolve((esriId && esriId.credentials) ? esriId.credentials.slice() : []);
                     } catch (err) {
-                        console.warn("[AutoRID v1.0.8 / GIS Export] Could not read host IdentityManager credentials.", err);
+                        console.warn("[AutoRID v1.0.11 / GIS Export] Could not read host IdentityManager credentials.", err);
                         resolve([]);
                     }
                 }, function (err) {
-                    console.warn("[AutoRID v1.0.8 / GIS Export] Host IdentityManager require failed.", err);
+                    console.warn("[AutoRID v1.0.11 / GIS Export] Host IdentityManager require failed.", err);
                     resolve([]);
                 });
             } catch (err) {
-                console.warn("[AutoRID v1.0.8 / GIS Export] Credential lookup failed.", err);
+                console.warn("[AutoRID v1.0.11 / GIS Export] Credential lookup failed.", err);
                 resolve([]);
             }
         });
@@ -927,7 +937,7 @@
 
     async function initializeAuthToken() {
         const credentials = await getHostPageArcgisCredentials();
-        console.log("[AutoRID v1.0.8 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
+        console.log("[AutoRID v1.0.11 / GIS Export] Host ArcGIS credentials found:", credentials.map(c => ({ server: c.server, userId: c.userId, expires: c.expires })));
 
         const match = credentials.find(c => {
             const server = String(c.server || "").toLowerCase();
@@ -936,12 +946,12 @@
 
         if (match && match.token) {
             CONFIG.authToken = match.token;
-            console.log("[AutoRID v1.0.8 / GIS Export] Using ArcGIS token from host page IdentityManager.");
+            console.log("[AutoRID v1.0.11 / GIS Export] Using ArcGIS token from host page IdentityManager.");
             return true;
         }
 
         CONFIG.authToken = null;
-        console.warn("[AutoRID v1.0.8 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
+        console.warn("[AutoRID v1.0.11 / GIS Export] No ArcGIS token found in host page IdentityManager. Protected Landbase services may fail with 499 Token Required.");
         return false;
     }
 
@@ -1394,7 +1404,7 @@
         box.style.boxShadow = "0 4px 14px rgba(0,0,0,.35)";
 
         const title = document.createElement("div");
-        title.textContent = "AutoRID v1.0.8 / GIS Export";
+        title.textContent = "AutoRID v1.0.11 / GIS Export";
         title.style.fontWeight = "700";
         title.style.marginBottom = "8px";
 
@@ -1505,7 +1515,7 @@
                     get: () => 1
                 });
             } catch (error) {
-                console.warn("[AutoRID v1.0.8 / GIS Export] Could not normalize iframe devicePixelRatio.", error);
+                console.warn("[AutoRID v1.0.11 / GIS Export] Could not normalize iframe devicePixelRatio.", error);
             }
             frameDoc.open();
             frameDoc.write("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no'></head><body></body></html>");
@@ -1569,7 +1579,7 @@
             try {
                 await withTimeout(layer.when(), timeoutMs, title);
             } catch (err) {
-                console.warn(`[AutoRID v1.0.8 / GIS Export] Layer failed to load: ${title}`, err);
+                console.warn(`[AutoRID v1.0.11 / GIS Export] Layer failed to load: ${title}`, err);
             }
         }
         updateProgress(ui, basePercent + 10, "Layer readiness complete. Continuing export...");
@@ -1633,6 +1643,35 @@
         return { ...selected, candidateCount: features.length };
     }
 
+    function cleanGisMetadataValue(value) {
+        if (value === null || value === undefined) return "";
+        const text = String(value).trim();
+        if (!text) return "";
+        const normalized = text.toUpperCase().replace(/\s+/g, " ");
+        if (["NULL", "<NULL>", "NONE", "N/A", "NA", "UNDEFINED", "UNKNOWN", "NOT APPLICABLE"].includes(normalized)) {
+            return "";
+        }
+        return text;
+    }
+
+    function metadataIsComplete(metadata) {
+        return Boolean(
+            cleanGisMetadataValue(metadata?.headquarters) &&
+            cleanGisMetadataValue(metadata?.substationId) &&
+            cleanGisMetadataValue(metadata?.circuitId) &&
+            cleanGisMetadataValue(metadata?.substationName) &&
+            cleanGisMetadataValue(metadata?.circuitName)
+        );
+    }
+
+    function sanitizeRidMetadata(metadata) {
+        const clean = { ...metadata };
+        for (const key of ["headquarters", "substationId", "circuitId", "feederId", "substationName", "circuitName"]) {
+            clean[key] = cleanGisMetadataValue(clean[key]);
+        }
+        return clean;
+    }
+
     function firstAttribute(attributes, names) {
         if (!attributes || typeof attributes !== "object") return "";
         const entries = Object.entries(attributes);
@@ -1647,7 +1686,8 @@
                     value !== undefined &&
                     String(value).trim() !== ""
                 ) {
-                    return String(value).trim();
+                    const cleaned = cleanGisMetadataValue(value);
+                    if (cleaned) return cleaned;
                 }
             }
         }
@@ -1752,7 +1792,7 @@
             const normalized = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
             const actualName = fieldMap[normalized];
             if (actualName && attributes[actualName] !== null && attributes[actualName] !== undefined) {
-                const value = String(attributes[actualName]).trim();
+                const value = cleanGisMetadataValue(attributes[actualName]);
                 if (value) return value;
             }
         }
@@ -1784,7 +1824,9 @@
 
     function mergeMetadata(base, addition) {
         for (const key of Object.keys(base)) {
-            if (!base[key] && addition[key]) base[key] = addition[key];
+            base[key] = cleanGisMetadataValue(base[key]);
+            const candidate = cleanGisMetadataValue(addition?.[key]);
+            if (!base[key] && candidate) base[key] = candidate;
         }
         return base;
     }
@@ -2047,8 +2089,12 @@
             .sort((a, b) => a.distanceFeet - b.distanceFeet);
     }
 
-    async function queryNearestPoleByLonLat(layerUrl, longitude, latitude) {
-        const radii = Array.from(new Set(CONFIG.coordinateSearchRetryRadiiFeet || [CONFIG.coordinateSearchRadiusFeet]));
+    async function queryNearestPoleByLonLat(layerUrl, longitude, latitude, radiiFeet) {
+        const radii = Array.from(new Set(
+            Array.isArray(radiiFeet) && radiiFeet.length
+                ? radiiFeet
+                : [CONFIG.coordinateSearchRadiusFeet]
+        ));
         for (const radiusFeet of radii) {
             const nearby = await queryNearbyPolesByLonLat(layerUrl, longitude, latitude, radiusFeet);
             if (nearby.length) return { ...nearby[0], searchRadiusFeet: radiusFeet };
@@ -2120,7 +2166,7 @@
     async function waitForViewIdle(view, timeoutMs = 15000) {
         const result = await waitForAdaptiveRenderReady(view, [], timeoutMs, "Map view");
         if (!result.ready) {
-            console.warn(`[AutoRID v1.0.8 / GIS Export] ${result.reason}`);
+            console.warn(`[AutoRID v1.0.11 / GIS Export] ${result.reason}`);
         }
         return result;
     }
@@ -2160,7 +2206,7 @@
                     readyLayerView = layerView;
                     break;
                 } catch (error) {
-                    console.warn(`[AutoRID v1.0.8 / GIS Export] ${label} readiness attempt ${attempt} failed.`, error);
+                    console.warn(`[AutoRID v1.0.11 / GIS Export] ${label} readiness attempt ${attempt} failed.`, error);
                     if (attempt <= CONFIG.screenshotLayerRetryCount) await sleep(700 * attempt);
                 }
             }
@@ -2179,7 +2225,7 @@
         if (!readiness.ready) {
             throw new Error(`Required GIS layers did not finish rendering within ${Math.round(timeoutPerLayerMs / 1000)} seconds. ${readiness.reason}`);
         }
-        console.log(`[AutoRID v1.0.8 / GIS Export] Map render confirmed ready in ${(readiness.elapsedMs / 1000).toFixed(2)} seconds.`);
+        console.log(`[AutoRID v1.0.11 / GIS Export] Map render confirmed ready in ${(readiness.elapsedMs / 1000).toFixed(2)} seconds.`);
         return readiness;
     }
 
@@ -2336,7 +2382,7 @@
             }
         }
 
-        console.log("[AutoRID v1.0.8 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
+        console.log("[AutoRID v1.0.11 / GIS Export] Reference label placement candidates:", candidates.map(candidate => {
             const refRect = labelRectFromPoint(referenceScreen, candidate, referenceLabelWidth, referenceLabelHeight);
             return {
                 name: candidate.name,
@@ -2939,10 +2985,16 @@
         const entries = group.map((item, index) => ({
             pole: project(targetPoints[index]),
             color: "#ed1c24",
-            lines: [
-                `New CEID: ${item.record.newCeid}`,
-                `Old CEID: ${item.record.oldCeid || "N/A"}`
-            ]
+            lines: item.coordinateOnly
+                ? [
+                    `New CEID: ${item.record.newCeid}`,
+                    "Pole not found in GIS",
+                    `${Number(item.pointData.latitude).toFixed(4)}, ${Number(item.pointData.longitude).toFixed(4)}`
+                ]
+                : [
+                    `New CEID: ${item.record.newCeid}`,
+                    `Old CEID: ${item.record.oldCeid || "N/A"}`
+                ]
         }));
 
         if (entries.some(entry => !entry.pole)) {
@@ -2968,7 +3020,7 @@
 
         for (const placement of layout) drawCallout(ctx, placement);
 
-        console.log("[AutoRID v1.0.8 / GIS Export] Floating callout layout", layout.map(item => ({
+        console.log("[AutoRID v1.0.11 / GIS Export] Floating callout layout", layout.map(item => ({
             lines: item.lines,
             rect: item.rect,
             radius: item.radius,
@@ -3086,9 +3138,9 @@
                     token: CONFIG.authToken,
                     expires: Date.now() + 60 * 60 * 1000
                 });
-                console.log("[AutoRID v1.0.8 / GIS Export] Registered host token with iframe IdentityManager.");
+                console.log("[AutoRID v1.0.11 / GIS Export] Registered host token with iframe IdentityManager.");
             } catch (err) {
-                console.warn("[AutoRID v1.0.8 / GIS Export] Failed to register token with iframe IdentityManager.", err);
+                console.warn("[AutoRID v1.0.11 / GIS Export] Failed to register token with iframe IdentityManager.", err);
             }
         }
 
@@ -3097,13 +3149,13 @@
 
         if (CONFIG.landbaseMapServers && CONFIG.landbaseMapServers.length) {
             landbaseUrls = CONFIG.landbaseMapServers.slice();
-            console.log("[AutoRID v1.0.8 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
+            console.log("[AutoRID v1.0.11 / GIS Export] Using hardcoded Landbase MapServers:", landbaseUrls);
         } else {
             try {
                 landbaseUrls = await discoverLandbaseMapServers(CONFIG.landbaseFolder);
-                console.log("[AutoRID v1.0.8 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
+                console.log("[AutoRID v1.0.11 / GIS Export] Discovered Landbase MapServers:", landbaseUrls);
             } catch (err) {
-                console.warn("[AutoRID v1.0.8 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
+                console.warn("[AutoRID v1.0.11 / GIS Export] Landbase discovery failed. Continuing with Electric + basemap only.", err);
                 landbaseUrls = [];
             }
         }
@@ -3114,7 +3166,7 @@
             opacity: 1
         }));
 
-        console.log("[AutoRID v1.0.8 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
+        console.log("[AutoRID v1.0.11 / GIS Export] Final Landbase layers added:", landbaseLayers.map(layer => ({ title: layer.title, url: layer.url })));
         const electricLayer = mapImageLayerOptions(MapImageLayer, { url: CONFIG.electricMapServer, title: "Electric", opacity: 1 });
         const markerLayer = new GraphicsLayer({ title: "CEID Update Markers and Labels" });
         const map = new EsriMap({ basemap: "gray-vector", layers: [...landbaseLayers, electricLayer, markerLayer] });
@@ -3131,7 +3183,7 @@
             screenResolution: `${screen.width}x${screen.height}`,
             browserViewport: `${window.innerWidth}x${window.innerHeight}`
         };
-        console.log("[AutoRID v1.0.8 / GIS Export] Normalized ArcGIS render environment", exportEnvironment);
+        console.log("[AutoRID v1.0.11 / GIS Export] Normalized ArcGIS render environment", exportEnvironment);
         if (Math.abs(frameDevicePixelRatio - 1) > 0.01) {
             throw new Error(`ArcGIS iframe pixel density could not be normalized. Expected 1, received ${frameDevicePixelRatio}.`);
         }
@@ -3139,7 +3191,7 @@
         await sleep(500);
 
         const results = {
-            exported: [], notFound: [], coordinateNoTargetPole: [], noReferencePole: [], duplicateCeidsResolved: [],
+            exported: [], notFound: [], coordinateNoTargetPole: [], coordinateOnlyTargets: [], noReferencePole: [], duplicateCeidsResolved: [],
             referenceFound: [], failed: [], badGeometry: [], invalidRows, groupsCreated: 0,
             documentImages: [], imagesDocument: ""
         };
@@ -3161,7 +3213,7 @@
                         results.duplicateCeidsResolved.push(
                             `SCID ${record.scid}: old CEID ${record.oldCeid} selected from ${selection.candidateCount} matches at ${selection.distanceFeet.toFixed(1)} ft`
                         );
-                        console.log(`[AutoRID v1.0.8 / GIS Export] Duplicate CEID resolved by Katapult coordinates.`, {
+                        console.log(`[AutoRID v1.0.11 / GIS Export] Duplicate CEID resolved by Katapult coordinates.`, {
                             scid: record.scid,
                             oldCeid: record.oldCeid,
                             candidateCount: selection.candidateCount,
@@ -3172,22 +3224,40 @@
                         const fallbackLongitude = Number(packagePole?.longitude);
                         const fallbackLatitude = Number(packagePole?.latitude);
                         if (Number.isFinite(fallbackLongitude) && Number.isFinite(fallbackLatitude)) {
-                            const nearest = await queryNearestPoleByLonLat(supportLayerUrl, fallbackLongitude, fallbackLatitude);
+                            const nearest = await queryNearestPoleByLonLat(
+                                supportLayerUrl, fallbackLongitude, fallbackLatitude, CONFIG.oldCeidFallbackSearchRadiiFeet
+                            );
                             feature = nearest?.feature || null;
                         }
                     }
                     if (!feature) { results.notFound.push(`SCID ${record.scid}: ${record.oldCeid}`); continue; }
+                    const pointData = getLonLatGeometry(feature);
+                    if (!pointData || !isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
+                    resolved.push({ record, feature, pointData, coordinateOnly: false });
                 } else {
-                    const nearest = await queryNearestPoleByLonLat(supportLayerUrl, record.longitude, record.latitude);
-                    if (!nearest || !nearest.feature) { results.coordinateNoTargetPole.push(`SCID ${record.scid}: ${record.sourceLine}`); continue; }
-                    feature = nearest.feature;
+                    const nearest = await queryNearestPoleByLonLat(
+                        supportLayerUrl, record.longitude, record.latitude, [CONFIG.coordinateSearchRadiusFeet]
+                    );
+                    if (nearest?.feature && nearest.distanceFeet <= CONFIG.coordinateSearchRadiusFeet) {
+                        const pointData = getLonLatGeometry(nearest.feature);
+                        if (!pointData || !isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
+                        resolved.push({ record, feature: nearest.feature, pointData, coordinateOnly: false });
+                    } else {
+                        const pointData = {
+                            longitude: Number(record.longitude), latitude: Number(record.latitude), spatialReference: { wkid: 4326 }
+                        };
+                        if (!isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
+                        resolved.push({ record, feature: null, pointData, coordinateOnly: true });
+                        results.coordinateOnlyTargets.push(
+                            `SCID ${record.scid}: New CEID ${record.newCeid} at ${pointData.latitude.toFixed(7)}, ${pointData.longitude.toFixed(7)}`
+                        );
+                        console.log(`[AutoRID v1.0.11 / GIS Export] N/A pole not found within ${CONFIG.coordinateSearchRadiusFeet} ft. Using exact Katapult coordinates.`, {
+                            scid: record.scid, newCeid: record.newCeid, latitude: pointData.latitude, longitude: pointData.longitude
+                        });
+                    }
                 }
-
-                const pointData = getLonLatGeometry(feature);
-                if (!pointData || !isLikelyLonLat(pointData)) { results.badGeometry.push(record.sourceLine); continue; }
-                resolved.push({ record, feature, pointData });
             } catch (err) {
-                console.error("[AutoRID v1.0.8 / GIS Export] Resolve failed", record, err);
+                console.error("[AutoRID v1.0.11 / GIS Export] Resolve failed", record, err);
                 results.failed.push(`${record.sourceLine} | ${err.message || err}`);
             }
         }
@@ -3227,7 +3297,7 @@
         if (unresolvedCount > 0) {
             const unresolvedDetails = [
                 ...results.notFound.map(value => `Old CEID not found: ${value}`),
-                ...results.coordinateNoTargetPole.map(value => `Coordinate pole not found: ${value}`),
+                ...results.coordinateNoTargetPole.map(value => `Coordinate lookup failed: ${value}`),
                 ...results.badGeometry.map(value => `Bad geometry: ${value}`),
                 ...results.failed.map(value => `Resolution failed: ${value}`)
             ];
@@ -3244,26 +3314,106 @@
         results.groupsCreated = groups.length;
         const packageImagesIntoWord = groups.length > 5;
 
-        let ridMetadata = null;
+        let ridMetadata = {
+            headquarters: "",
+            substationId: "",
+            circuitId: "",
+            feederId: "",
+            substationName: "",
+            circuitName: ""
+        };
+        let metadataSource = null;
         if (resolved.length) {
-            updateProgress(ui, 55, "Reading Headquarters, Substation ID, and Circuit ID from the first pole...");
-            try {
-                ridMetadata = await fetchFirstPoleRidMetadata(resolved[0].pointData);
-                if (window.__RID_WORKFLOW_PACKAGE) {
-                    window.__RID_WORKFLOW_PACKAGE = {
-                        ...window.__RID_WORKFLOW_PACKAGE,
-                        gis: {
-                            ...(window.__RID_WORKFLOW_PACKAGE.gis || {}),
-                            ...ridMetadata,
-                            sourceScid: resolved[0].record.scid,
-                            sourceOldCeid: resolved[0].record.oldCeid,
-                            sourceNewCeid: resolved[0].record.newCeid
-                        }
-                    };
+            const metadataCandidates = [];
+            const seenCandidateKeys = new Set();
+            const addMetadataCandidate = (pointData, source) => {
+                if (!pointData || !isLikelyLonLat(pointData)) return;
+                const key = `${Number(pointData.latitude).toFixed(7)},${Number(pointData.longitude).toFixed(7)}`;
+                if (seenCandidateKeys.has(key)) return;
+                seenCandidateKeys.add(key);
+                metadataCandidates.push({ pointData, source });
+            };
+
+            // Prefer poles from the current job in their existing order.
+            for (const item of resolved) {
+                addMetadataCandidate(item.pointData, {
+                    type: "job pole",
+                    scid: item.record.scid,
+                    oldCeid: item.record.oldCeid,
+                    newCeid: item.record.newCeid
+                });
+            }
+
+            // If job poles still contain missing metadata, inspect their adjacent/reference poles.
+            for (const item of resolved) {
+                const adjacent = item.adjacentReference;
+                const adjacentPoint = adjacent?.feature ? getLonLatGeometry(adjacent.feature) : null;
+                addMetadataCandidate(adjacentPoint, {
+                    type: "adjacent pole",
+                    scid: item.record.scid,
+                    oldCeid: adjacent?.ceTag || "",
+                    newCeid: item.record.newCeid
+                });
+            }
+
+            for (let index = 0; index < metadataCandidates.length; index++) {
+                const candidate = metadataCandidates[index];
+                updateProgress(
+                    ui,
+                    55,
+                    `Reading GIS metadata from candidate ${index + 1} of ${metadataCandidates.length}...\n` +
+                    `${candidate.source.type}: SCID ${candidate.source.scid || "N/A"}`
+                );
+                try {
+                    const candidateMetadata = sanitizeRidMetadata(
+                        await fetchFirstPoleRidMetadata(candidate.pointData)
+                    );
+                    mergeMetadata(ridMetadata, candidateMetadata);
+                    if (!metadataSource && Object.values(candidateMetadata).some(Boolean)) {
+                        metadataSource = candidate.source;
+                    }
+                    console.log(`[AutoRID v1.0.11 / GIS Export] Metadata candidate result`, {
+                        candidate: candidate.source,
+                        candidateMetadata,
+                        accumulatedMetadata: { ...ridMetadata }
+                    });
+                    if (metadataIsComplete(ridMetadata)) break;
+                } catch (metadataCandidateError) {
+                    console.warn(`[AutoRID v1.0.11 / GIS Export] Metadata candidate failed.`, {
+                        candidate: candidate.source,
+                        error: metadataCandidateError
+                    });
                 }
-            } catch (metadataError) {
-                console.error(`[${CONFIG.filePrefix}] Unable to retrieve RID form GIS metadata.`, metadataError);
-                ridMetadata = { error: metadataError.message || String(metadataError) };
+            }
+
+            ridMetadata = sanitizeRidMetadata(ridMetadata);
+            const missingMetadata = [
+                ["Headquarters", ridMetadata.headquarters],
+                ["Substation ID", ridMetadata.substationId],
+                ["Circuit ID", ridMetadata.circuitId],
+                ["Substation Name", ridMetadata.substationName],
+                ["Circuit Name", ridMetadata.circuitName]
+            ].filter(([, value]) => !cleanGisMetadataValue(value)).map(([label]) => label);
+
+            if (missingMetadata.length) {
+                throw new Error(
+                    `GIS metadata remained incomplete after checking ${metadataCandidates.length} job/adjacent pole locations. ` +
+                    `Missing: ${missingMetadata.join(", ")}. AutoRID stopped so NULL values are not exported.`
+                );
+            }
+
+            if (window.__RID_WORKFLOW_PACKAGE) {
+                window.__RID_WORKFLOW_PACKAGE = {
+                    ...window.__RID_WORKFLOW_PACKAGE,
+                    gis: {
+                        ...(window.__RID_WORKFLOW_PACKAGE.gis || {}),
+                        ...ridMetadata,
+                        sourceType: metadataSource?.type || "job pole",
+                        sourceScid: metadataSource?.scid || resolved[0].record.scid,
+                        sourceOldCeid: metadataSource?.oldCeid || resolved[0].record.oldCeid,
+                        sourceNewCeid: metadataSource?.newCeid || resolved[0].record.newCeid
+                    }
+                };
             }
         }
         console.table(groups.map((group, index) => ({
@@ -3351,7 +3501,7 @@
                 }
                 results.exported.push(fileName);
             } catch (err) {
-                console.error("[AutoRID v1.0.8 / GIS Export] Group failed", groupIndex + 1, err);
+                console.error("[AutoRID v1.0.11 / GIS Export] Group failed", groupIndex + 1, err);
                 results.failed.push(`Group ${groupIndex + 1}: ${group.map(x => x.record.newCeid).join(", ")} | ${err.message || err}`);
             }
         }
@@ -3370,6 +3520,10 @@
 
         if (window.__RID_WORKFLOW_PACKAGE && window.__RID_WORKFLOW_PACKAGE.gis) {
             try {
+                window.__RID_WORKFLOW_PACKAGE.gis = sanitizeRidMetadata(window.__RID_WORKFLOW_PACKAGE.gis);
+                if (!metadataIsComplete(window.__RID_WORKFLOW_PACKAGE.gis)) {
+                    throw new Error("GIS metadata validation failed before export. NULL or missing RID metadata will not be written.");
+                }
                 window.__RID_WORKFLOW_PACKAGE = downloadUpdatedWorkflowPackage(window.__RID_WORKFLOW_PACKAGE);
                 results.updatedPackage = `RID_Workflow_${window.__RID_WORKFLOW_PACKAGE.notificationNumber}_GIS_Updated.json`;
             } catch (packageError) {
@@ -3395,7 +3549,9 @@
             `ArcGIS frame size: ${exportEnvironment.frameCssSize}\n` +
             `Duplicate CEIDs resolved by coordinates: ${results.duplicateCeidsResolved.length}\n` +
             `Old CEID not found: ${results.notFound.length}\n` +
-            `N/A coordinate target pole not found: ${results.coordinateNoTargetPole.length}\n` +
+            `N/A poles matched to GIS within ${CONFIG.coordinateSearchRadiusFeet} ft: ${coordinateResolved.filter(item => !item.coordinateOnly).length}\n` +
+            `N/A poles circled at Katapult coordinates: ${results.coordinateOnlyTargets.length}\n` +
+            `N/A coordinate query failures: ${results.coordinateNoTargetPole.length}\n` +
             `Reference pole found: ${results.referenceFound.length}\n` +
             `No reference pole found: ${results.noReferencePole.length}\n` +
             `Bad geometry/input: ${results.badGeometry.length}\n` +
@@ -3404,7 +3560,8 @@
             (results.updatedPackage ? `\nGIS-updated JSON: ${results.updatedPackage}` : "");
 
         if (results.notFound.length) message += `\n\nOld CEID not found:\n${results.notFound.join(", ")}`;
-        if (results.coordinateNoTargetPole.length) message += `\n\nN/A target pole not found:\n${results.coordinateNoTargetPole.join("\n")}`;
+        if (results.coordinateNoTargetPole.length) message += `\n\nN/A coordinate query failures:\n${results.coordinateNoTargetPole.join("\n")}`;
+        if (results.coordinateOnlyTargets.length) message += `\n\nN/A poles not present in GIS - circled at Katapult coordinates:\n${results.coordinateOnlyTargets.join("\n")}`;
         if (results.duplicateCeidsResolved.length) message += `\n\nDuplicate CEIDs resolved by coordinate check:\n${results.duplicateCeidsResolved.join("\n")}`;
         if (results.noReferencePole.length) message += `\n\nNo reference pole found:\n${results.noReferencePole.join("\n")}`;
         if (results.invalidRows.length) message += `\n\nInvalid rows skipped:\n` + results.invalidRows.map(x => `${x.line} (${x.reason})`).join("\n");
@@ -3429,8 +3586,8 @@ Next: Open the RID form and run the bookmarklet again.`,
             tone: results.failed.length ? "warning" : "success"
         });
     } catch (err) {
-        console.error("[AutoRID v1.0.8 / GIS Export] Fatal error:", err);
-        alert("AutoRID v1.0.8 / GIS Export failed. Check console for details:\n\n" + err.message);
+        console.error("[AutoRID v1.0.11 / GIS Export] Fatal error:", err);
+        alert("AutoRID v1.0.11 / GIS Export failed. Check console for details:\n\n" + err.message);
     }
 
     }
@@ -3439,7 +3596,7 @@ Next: Open the RID form and run the bookmarklet again.`,
 
     "use strict";
 
-    const VERSION = "AutoRID v1.0.8 / RID Form";
+    const VERSION = "AutoRID v1.0.11 / RID Form";
     const CONFIG = {
         correctionType: "Electric CAD URD",
         errorCategory: "Pole Errors",
@@ -4023,15 +4180,15 @@ Next: Open the RID form and run the bookmarklet again.`,
     }
 
     function showRidCopyAssistant(fields, notificationNumber, rowCount) {
-        document.getElementById("autorid-copy-assistant-v1-0-8")?.remove();
+        document.getElementById("autorid-copy-assistant-v1-0-11")?.remove();
         document.getElementById("rid-workflow-card")?.remove();
         const panel = document.createElement("section");
-        panel.id = "autorid-copy-assistant-v1-0-8";
+        panel.id = "autorid-copy-assistant-v1-0-11";
         panel.style.cssText = "position:fixed;top:72px;right:18px;z-index:2147483647;width:390px;height:620px;min-width:300px;min-height:180px;max-width:calc(100vw - 20px);max-height:calc(100vh - 20px);overflow:auto;resize:both;background:#fff;color:#242424;border:1px solid #c8c8c8;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.28);font-family:Segoe UI,Arial,sans-serif;font-size:14px;";
         const header = document.createElement("div");
         header.style.cssText = "position:sticky;top:0;background:#742774;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:1;border-radius:11px 11px 0 0;cursor:move;user-select:none;";
         const heading = document.createElement("div");
-        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0.8</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
+        heading.innerHTML = `<div style="font-size:17px;font-weight:700">AutoRID v1.0.11</div><div style="font-size:12px;opacity:.9;margin-top:2px">${notificationNumber} | ${rowCount} pole${rowCount === 1 ? "" : "s"}</div>`;
         const controls = document.createElement("div");
         const minimize = document.createElement("button");
         const close = document.createElement("button");
@@ -4067,7 +4224,7 @@ Next: Open the RID form and run the bookmarklet again.`,
         const parsed = parseRidRows(combined.ridText);
         if (!parsed.rows.length || parsed.invalid.length) throw new Error("The selected package contains invalid RID rows.");
         const missing = parsed.rows.filter(row => row.mode === "newTag" && !row.adjacentCeid);
-        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.8.");
+        if (missing.length) throw new Error("The selected GIS-updated JSON is missing adjacent CE IDs. Run GIS phase again with AutoRID v1.0.11.");
         const description = buildDescription(parsed.rows);
         const gis = window.__RID_WORKFLOW_PACKAGE?.gis || {};
         const substationValue = [gis.substationName, gis.substationId].map(v=>String(v||"").trim()).filter(Boolean).join(" ");
@@ -4104,7 +4261,7 @@ Next: Open the RID form and run the bookmarklet again.`,
         }
 
         if (mode === "rid-form") {
-            await prepareSharedPayload("AutoRID v1.0.8");
+            await prepareSharedPayload("AutoRID v1.0.11");
             await runRidFormStage();
             return;
         }
